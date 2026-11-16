@@ -11,11 +11,11 @@ from claw_skills_kit.models import Field, Template
 
 def make_template() -> Template:
     return Template(
-        standards={"retry_limit": "3"},
+        standards={"schedule": "Every hour"},
         fields=(
-            Field("target_channel", "Where should the summary be posted?", "", True),
-            Field("timezone", "Which timezone should schedules use?", "America/Sao_Paulo", False),
-            Field("owner", "Who owns this skill for the client?", "", False),
+            Field("extra urgent_rules", "Q1", "Anything with a deadline", "", True),
+            Field("sender_rules / suppression_rules", "Q2", "Promotions stay out", "Keep as suggested", True),
+            Field("notes_for_team", "Q4", "", "", False),
         ),
     )
 
@@ -23,7 +23,7 @@ def make_template() -> Template:
 # --- load_answers: reading the JSON answers file --------------------------------
 
 def test_load_answers_reads_a_flat_json_object():
-    assert load_answers('{"target_channel": "#sales"}') == {"target_channel": "#sales"}
+    assert load_answers('{"extra urgent_rules": "deadlines"}') == {"extra urgent_rules": "deadlines"}
 
 
 def test_load_answers_accepts_an_empty_object():
@@ -32,12 +32,12 @@ def test_load_answers_accepts_an_empty_object():
 
 def test_load_answers_rejects_invalid_json_and_names_the_position():
     with pytest.raises(InterviewError, match=r"line 1"):
-        load_answers('{"target_channel": ')
+        load_answers('{"extra urgent_rules": ')
 
 
 def test_load_answers_rejects_a_top_level_that_is_not_an_object():
     with pytest.raises(InterviewError):
-        load_answers('["target_channel"]')
+        load_answers('["extra urgent_rules"]')
 
 
 def test_load_answers_rejects_non_string_values_and_names_the_key():
@@ -46,36 +46,38 @@ def test_load_answers_rejects_non_string_values_and_names_the_key():
 
 
 def test_load_answers_rejects_duplicate_keys_and_names_the_key():
-    with pytest.raises(InterviewError, match=r"'timezone'"):
-        load_answers('{"timezone": "UTC", "timezone": "CET"}')
+    with pytest.raises(InterviewError, match=r"'critical_senders'"):
+        load_answers('{"critical_senders": "a", "critical_senders": "b"}')
 
 
 # --- apply_answers: merging answers into the template ---------------------------
 
 def test_apply_answers_fills_a_blank_answer():
-    result = apply_answers(make_template(), {"target_channel": "#sales"})
-    assert result.fields[0].answer == "#sales"
+    result = apply_answers(make_template(), {"extra urgent_rules": "deadlines"})
+    assert result.fields[0].answer == "deadlines"
 
 
-def test_apply_answers_keeps_the_template_answer_when_none_is_given():
-    result = apply_answers(make_template(), {"target_channel": "#sales"})
-    assert result.fields[1].answer == "America/Sao_Paulo"
+def test_apply_answers_keeps_the_existing_answer_when_none_is_given():
+    result = apply_answers(make_template(), {"extra urgent_rules": "deadlines"})
+    assert result.fields[1].answer == "Keep as suggested"
 
 
-def test_apply_answers_lets_the_given_answer_override_the_template_answer():
-    result = apply_answers(make_template(), {"timezone": "UTC"})
-    assert result.fields[1].answer == "UTC"
+def test_apply_answers_lets_the_given_answer_override_the_existing_one():
+    result = apply_answers(make_template(), {"sender_rules / suppression_rules": "show receipts"})
+    assert result.fields[1].answer == "show receipts"
 
 
 def test_apply_answers_treats_a_blank_value_as_not_provided():
-    result = apply_answers(make_template(), {"timezone": "   ", "target_channel": ""})
-    assert result.fields[1].answer == "America/Sao_Paulo"
+    result = apply_answers(
+        make_template(), {"sender_rules / suppression_rules": "   ", "extra urgent_rules": ""}
+    )
+    assert result.fields[1].answer == "Keep as suggested"
     assert result.fields[0].answer == ""
 
 
 def test_apply_answers_strips_surrounding_whitespace():
-    result = apply_answers(make_template(), {"target_channel": "  #sales "})
-    assert result.fields[0].answer == "#sales"
+    result = apply_answers(make_template(), {"extra urgent_rules": "  deadlines "})
+    assert result.fields[0].answer == "deadlines"
 
 
 def test_apply_answers_rejects_unknown_keys_and_lists_all_of_them():
@@ -83,44 +85,43 @@ def test_apply_answers_rejects_unknown_keys_and_lists_all_of_them():
         apply_answers(make_template(), {"nope": "x", "typo": "y"})
 
 
-def test_apply_answers_rejects_a_key_that_is_a_company_standard():
-    with pytest.raises(InterviewError, match=r"standard.*retry_limit"):
-        apply_answers(make_template(), {"retry_limit": "9"})
+def test_apply_answers_rejects_a_key_that_is_a_standard():
+    with pytest.raises(InterviewError, match=r"standard.*schedule"):
+        apply_answers(make_template(), {"schedule": "every minute"})
 
 
-def test_apply_answers_keeps_order_questions_flags_and_standards():
+def test_apply_answers_keeps_order_ids_suggestions_flags_and_standards():
     original = make_template()
-    result = apply_answers(original, {"owner": "Ana"})
-    assert [f.key for f in result.fields] == ["target_channel", "timezone", "owner"]
-    assert [f.question for f in result.fields] == [f.question for f in original.fields]
+    result = apply_answers(original, {"notes_for_team": "hello"})
+    assert [f.key for f in result.fields] == [f.key for f in original.fields]
+    assert [f.comes_from for f in result.fields] == [f.comes_from for f in original.fields]
+    assert [f.suggested for f in result.fields] == [f.suggested for f in original.fields]
     assert [f.required for f in result.fields] == [f.required for f in original.fields]
     assert result.standards == original.standards
 
 
 def test_apply_answers_does_not_change_the_template_it_receives():
     original = make_template()
-    apply_answers(original, {"target_channel": "#sales"})
+    apply_answers(original, {"extra urgent_rules": "deadlines"})
     assert original == make_template()
 
 
 def test_apply_answers_is_idempotent():
-    answers = {"target_channel": "#sales", "timezone": "UTC"}
+    answers = {"extra urgent_rules": "deadlines", "sender_rules / suppression_rules": "show receipts"}
     once = apply_answers(make_template(), answers)
-    twice = apply_answers(once, answers)
-    assert twice == once
+    assert apply_answers(once, answers) == once
 
 
 # --- missing_required: which required answers are still blank -------------------
 
 def test_missing_required_lists_blank_required_fields_in_template_order():
-    missing = missing_required(make_template())
-    assert [f.key for f in missing] == ["target_channel"]
+    assert [f.key for f in missing_required(make_template())] == ["extra urgent_rules"]
 
 
 def test_missing_required_ignores_blank_optional_fields():
-    assert "owner" not in [f.key for f in missing_required(make_template())]
+    assert "notes_for_team" not in [f.key for f in missing_required(make_template())]
 
 
 def test_missing_required_is_empty_once_every_required_answer_is_given():
-    filled = apply_answers(make_template(), {"target_channel": "#sales"})
+    filled = apply_answers(make_template(), {"extra urgent_rules": "deadlines"})
     assert missing_required(filled) == ()
