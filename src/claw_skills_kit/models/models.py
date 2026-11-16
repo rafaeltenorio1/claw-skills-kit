@@ -4,7 +4,7 @@ from dataclasses import dataclass
 class Field:
     key: str
     question: str
-    answer: str          # "" quando em branco
+    answer: str
     required: bool
 
 @dataclass(frozen=True)

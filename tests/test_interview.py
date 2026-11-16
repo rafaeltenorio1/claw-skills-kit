@@ -84,7 +84,7 @@ def test_apply_answers_rejects_unknown_keys_and_lists_all_of_them():
 
 
 def test_apply_answers_rejects_a_key_that_is_a_company_standard():
-    with pytest.raises(InterviewError, match=r"retry_limit"):
+    with pytest.raises(InterviewError, match=r"standard.*retry_limit"):
         apply_answers(make_template(), {"retry_limit": "9"})
 
 
