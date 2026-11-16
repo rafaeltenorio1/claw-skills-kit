@@ -45,8 +45,16 @@ def load_answers(text: str) -> dict[str, str]:
 
 def apply_answers(template: Template, answers: dict[str, str]) -> Template:
     """Return a new Template with the given answers filled in."""
+    answer_keys = set(answers)
+
+    standard_overrides = answer_keys & set(template.standards)
+    if standard_overrides:
+        raise InterviewError(
+            f"Cannot override standard keys in answers: {', '.join(sorted(standard_overrides))}."
+        )
+
     known_keys = {field.key for field in template.fields}
-    unknown_keys = set(answers) - known_keys
+    unknown_keys = answer_keys - known_keys
     if unknown_keys:
         raise InterviewError(
             f"Unknown keys in answers: {', '.join(sorted(unknown_keys))}."

@@ -15,6 +15,10 @@ class TemplateFormatError(ValueError):
     """The document does not follow the expected format."""
 
 
+class FillError(ValueError):
+    """The answers cannot be written into the text, or the template does not match it."""
+
+
 class _Section(NamedTuple):
     heading_line: int
     lines: list[tuple[int, str]]  # (line number, text)
@@ -24,6 +28,78 @@ class _Table(NamedTuple):
     header: list[str]
     header_line: int
     rows: list[tuple[int, list[str]]]  # (line number, cells)
+
+
+def fill_answers(text: str, template: Template) -> str:
+    """Return `text` with each row's Answer cell set to the template's answer; nothing else changes."""
+    field_by_key: dict[str, Field] = {}
+    for field in template.fields:
+        if field.key in field_by_key:
+            raise FillError(f"Duplicate field key in template: {field.key!r}.")
+        if "|" in field.answer or len(field.answer.splitlines()) > 1 or "\n" in field.answer or "\r" in field.answer:
+            raise FillError(
+                f"Answer for key {field.key!r} cannot contain '|' or line breaks."
+            )
+        field_by_key[field.key] = field
+
+    try:
+        sections = _split_sections(text)
+        if _ANSWERS not in sections:
+            raise FillError("Line 1: missing required section '## Client Answers'.")
+        headers, rows = _read_table(_ANSWERS, sections[_ANSWERS])
+    except TemplateFormatError as exc:
+        raise FillError(str(exc)) from None
+
+    normalized_headers = [h.casefold() for h in headers]
+    if normalized_headers != ["key", "question", "answer", "required"]:
+        raise FillError(
+            f"Section '{_ANSWERS}': expected headers ['Key', 'Question', 'Answer', 'Required'], got {headers}."
+        )
+
+    row_keys: set[str] = set()
+    for line_no, cells in rows:
+        if len(cells) != 4:
+            raise FillError(
+                f"Line {line_no} in section '{_ANSWERS}': expected 4 cells, got {len(cells)}."
+            )
+        key = cells[0]
+        if key in row_keys:
+            raise FillError(
+                f"Line {line_no} in section '{_ANSWERS}': duplicate key {key!r}."
+            )
+        row_keys.add(key)
+
+    missing_in_text = sorted(set(field_by_key) - row_keys)
+    if missing_in_text:
+        raise FillError(
+            f"Template keys missing from text: {', '.join(missing_in_text)}."
+        )
+
+    missing_in_template = sorted(row_keys - set(field_by_key))
+    if missing_in_template:
+        raise FillError(
+            f"Text keys missing from template: {', '.join(missing_in_template)}."
+        )
+
+    raw_lines = text.splitlines(keepends=True)
+
+    for line_no, cells in rows:
+        key = cells[0]
+        current_answer = cells[2]
+        target_answer = field_by_key[key].answer
+
+        if current_answer == target_answer:
+            continue
+
+        raw_line = raw_lines[line_no - 1]
+        line_body = raw_line.rstrip("\r\n")
+        line_ending = raw_line[len(line_body):]
+
+        parts = line_body.split("|")
+        parts[3] = f" {target_answer} "
+        raw_lines[line_no - 1] = "|".join(parts) + line_ending
+
+    return "".join(raw_lines)
 
 
 def parse_template(text: str) -> Template:
