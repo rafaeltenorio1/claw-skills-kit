@@ -3,7 +3,7 @@ import pytest
  
 from claw_skills_kit.interview import apply_answers
 from claw_skills_kit.models import Field, Template
-from claw_skills_kit.template_format import FillError, fill_answers, parse_template
+from claw_skills_kit.template_format import FillError, TemplateFormatError, fill_answers, parse_template
  
 TEXT = """# Client config: hello-channel
  
@@ -102,4 +102,45 @@ def test_rejects_a_text_row_that_is_not_in_the_template():
     partial = Template(standards={}, fields=(Field("target_channel", "Q?", "#sales", True),))
     with pytest.raises(FillError, match="timezone"):
         fill_answers(TEXT, partial)
+ 
+ 
+@pytest.mark.parametrize("answer", ["abc\n", "abc\x0b", "a\u2028b"])
+def test_rejects_any_kind_of_line_break_even_at_the_end_of_an_answer(answer):
+    template = Template(
+        standards={},
+        fields=(
+            Field("target_channel", "Where should the summary be posted?", answer, True),
+            Field("timezone", "Which timezone should schedules use?", "America/Sao_Paulo", False),
+        ),
+    )
+    with pytest.raises(FillError, match="target_channel"):
+        fill_answers(TEXT, template)
+ 
+ 
+def test_a_blank_answer_leaves_a_tidy_empty_cell():
+    template = parse_template(TEXT)
+    blanked = Template(
+        standards=template.standards,
+        fields=(template.fields[0], Field("timezone", template.fields[1].question, "", False)),
+    )
+    out = fill_answers(TEXT, blanked)
+    assert "| Which timezone should schedules use? | | no |" in out
+    assert parse_template(out).fields[1].answer == ""
+ 
+ 
+def test_a_text_without_the_answers_section_is_a_template_error_not_a_fill_error():
+    with pytest.raises(TemplateFormatError):
+        fill_answers("# nothing useful here\n", Template(standards={}, fields=()))
+ 
+ 
+def test_a_text_with_duplicate_keys_is_a_template_error():
+    duplicated = TEXT.replace(
+        "| timezone | Which timezone should schedules use? | America/Sao_Paulo | no |",
+        "| target_channel | Again? | | no |",
+    )
+    template = Template(
+        standards={}, fields=(Field("target_channel", "Where should the summary be posted?", "#x", True),)
+    )
+    with pytest.raises(TemplateFormatError, match=r"line \d+"):
+        fill_answers(duplicated, template)
  

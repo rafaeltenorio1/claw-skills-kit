@@ -21,89 +21,87 @@ class FillError(ValueError):
 
 class _Section(NamedTuple):
     heading_line: int
-    lines: list[tuple[int, str]]  # (line number, text)
+    lines: list[tuple[int, str]]  
 
 
 class _Table(NamedTuple):
     header: list[str]
     header_line: int
-    rows: list[tuple[int, list[str]]]  # (line number, cells)
+    rows: list[tuple[int, list[str]]]  
 
 
-def fill_answers(text: str, template: Template) -> str:
-    """Return `text` with each row's Answer cell set to the template's answer; nothing else changes."""
-    field_by_key: dict[str, Field] = {}
+
+def _fits_in_a_cell(answer: str) -> bool:
+
+    return "|" not in answer and (not answer or answer.splitlines() == [answer])
+ 
+ 
+def _index_fields(template: Template) -> dict[str, Field]:
+
+    by_key: dict[str, Field] = {}
     for field in template.fields:
-        if field.key in field_by_key:
+        if field.key in by_key:
             raise FillError(f"Duplicate field key in template: {field.key!r}.")
-        if "|" in field.answer or len(field.answer.splitlines()) > 1 or "\n" in field.answer or "\r" in field.answer:
-            raise FillError(
-                f"Answer for key {field.key!r} cannot contain '|' or line breaks."
-            )
-        field_by_key[field.key] = field
+        if not _fits_in_a_cell(field.answer):
+            raise FillError(f"Answer for key {field.key!r} cannot contain '|' or line breaks.")
+        by_key[field.key] = field
+    return by_key
+ 
+ 
+def _read_answers_table(text: str) -> _Table:
 
-    try:
-        sections = _split_sections(text)
-        if _ANSWERS not in sections:
-            raise FillError("Line 1: missing required section '## Client Answers'.")
-        headers, rows = _read_table(_ANSWERS, sections[_ANSWERS])
-    except TemplateFormatError as exc:
-        raise FillError(str(exc)) from None
-
-    normalized_headers = [h.casefold() for h in headers]
-    if normalized_headers != ["key", "question", "answer", "required"]:
-        raise FillError(
-            f"Section '{_ANSWERS}': expected headers ['Key', 'Question', 'Answer', 'Required'], got {headers}."
-        )
+    sections = _split_sections(text)
+    if _ANSWERS not in sections:
+        raise TemplateFormatError("required section '## Client answers' is missing.")
+    table = _read_table(_ANSWERS, sections[_ANSWERS])
+    _check_header(_ANSWERS, table, _ANSWERS_HEADER)
+    return table
+ 
+ 
+def _check_keys_match(fields: dict[str, Field], table: _Table) -> None:
 
     row_keys: set[str] = set()
-    for line_no, cells in rows:
-        if len(cells) != 4:
-            raise FillError(
-                f"Line {line_no} in section '{_ANSWERS}': expected 4 cells, got {len(cells)}."
-            )
+    for line_no, cells in table.rows:
         key = cells[0]
         if key in row_keys:
-            raise FillError(
-                f"Line {line_no} in section '{_ANSWERS}': duplicate key {key!r}."
-            )
+            raise TemplateFormatError(f"line {line_no} in '{_ANSWERS}': duplicate key '{key}'.")
         row_keys.add(key)
+ 
+    absent_from_text = sorted(set(fields) - row_keys)
+    if absent_from_text:
+        raise FillError("Template keys missing from the text: " + ", ".join(absent_from_text) + ".")
+    absent_from_template = sorted(row_keys - set(fields))
+    if absent_from_template:
+        raise FillError("Text keys missing from the template: " + ", ".join(absent_from_template) + ".")
+ 
+ 
+def _patch_rows(text: str, table: _Table, fields: dict[str, Field]) -> str:
 
-    missing_in_text = sorted(set(field_by_key) - row_keys)
-    if missing_in_text:
-        raise FillError(
-            f"Template keys missing from text: {', '.join(missing_in_text)}."
-        )
+    lines = text.splitlines(keepends=True)
+    for line_no, cells in table.rows:
+        answer = fields[cells[0]].answer
+        if answer == cells[2]:
+            continue  
+ 
+        raw = lines[line_no - 1]
+        body = raw.rstrip("\r\n")
+        ending = raw[len(body):]
+        parts = body.split("|")
+        parts[3] = f" {answer} " if answer else " "
+        lines[line_no - 1] = "|".join(parts) + ending
+    return "".join(lines)
+ 
+ 
+def fill_answers(text: str, template: Template) -> str:
 
-    missing_in_template = sorted(row_keys - set(field_by_key))
-    if missing_in_template:
-        raise FillError(
-            f"Text keys missing from template: {', '.join(missing_in_template)}."
-        )
-
-    raw_lines = text.splitlines(keepends=True)
-
-    for line_no, cells in rows:
-        key = cells[0]
-        current_answer = cells[2]
-        target_answer = field_by_key[key].answer
-
-        if current_answer == target_answer:
-            continue
-
-        raw_line = raw_lines[line_no - 1]
-        line_body = raw_line.rstrip("\r\n")
-        line_ending = raw_line[len(line_body):]
-
-        parts = line_body.split("|")
-        parts[3] = f" {target_answer} "
-        raw_lines[line_no - 1] = "|".join(parts) + line_ending
-
-    return "".join(raw_lines)
+    fields = _index_fields(template)
+    table = _read_answers_table(text)
+    _check_keys_match(fields, table)
+    return _patch_rows(text, table, fields)
 
 
 def parse_template(text: str) -> Template:
-    """Parse client-config.md into a validated Template."""
+
     sections = _split_sections(text)
 
     if _STANDARDS not in sections:
@@ -117,7 +115,7 @@ def parse_template(text: str) -> Template:
 
 
 def _split_sections(text: str) -> dict[str, _Section]:
-    """Section title (casefolded) -> its heading line and body lines."""
+
     sections: dict[str, _Section] = {}
     current: _Section | None = None
 
@@ -134,7 +132,7 @@ def _split_sections(text: str) -> dict[str, _Section]:
 
 
 def _read_table(name: str, section: _Section) -> _Table:
-    """The one Markdown table of a known section."""
+
     table_lines: list[tuple[int, str]] = []
     table_ended = False
 
