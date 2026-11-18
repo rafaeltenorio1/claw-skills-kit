@@ -7,7 +7,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: csk-openclaw:local
+      args:
+        # with a browser by default; set CSK_OPENCLAW_BASE=ghcr.io/openclaw/openclaw:2026.11.3 for the smaller image
+        OPENCLAW_BASE: ${CSK_OPENCLAW_BASE:-ghcr.io/openclaw/openclaw:2026.11.3-browser}
+    image: csk-openclaw:${CSK_IMAGE_TAG:-local}
     env_file:
       - path: ${CSK_ENV_FILE:-${HOME}/.config/csk/openclaw-test.env}
         required: true

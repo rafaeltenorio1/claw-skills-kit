@@ -1,6 +1,9 @@
 # OpenClaw gateway with claw-skills-kit and the skill-manager skill baked in.
 # Build from the repository root:  docker build -f docker/Dockerfile -t csk-openclaw:local .
-FROM ghcr.io/openclaw/openclaw:2026.11.3
+# OPENCLAW_BASE picks the official image. Default: the "-browser" tag (Chromium + Xvfb, ~4.6 GB built);
+# ghcr.io/openclaw/openclaw:2026.11.3 is the same release without a browser (~3.2 GB built).
+ARG OPENCLAW_BASE=ghcr.io/openclaw/openclaw:2026.11.3-browser
+FROM ${OPENCLAW_BASE}
 
 # The image ships Python 3.11; claw-skills-kit needs >= 3.12. uv installs its own Python next to the kit,
 # so the image's Python is left alone.

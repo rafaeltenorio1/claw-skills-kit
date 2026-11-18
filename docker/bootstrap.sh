@@ -43,6 +43,13 @@ openclaw config set --batch-json "[
    \"value\": [\"http://127.0.0.1:$HOST_PORT\", \"http://localhost:$HOST_PORT\"]}
 ]"
 
+# 2b. Browser images only: Chrome's own sandbox cannot start in a container (it aborts with signal 6),
+#     so it is turned off; the container is the isolation boundary. Images without Chromium are left alone.
+if ls -d "$HOME"/.cache/ms-playwright/chromium-* > /dev/null 2>&1; then
+    step "browser found: turning off Chrome's in-container sandbox"
+    openclaw config set browser.noSandbox true
+fi
+
 # 3. The skill-manager skill, replaced by the copy baked into the image.
 step "installing skill-manager"
 mkdir -p "$WORKSPACE/skills"
