@@ -347,7 +347,7 @@ def new_client_config(skill: str) -> str:
     text = (
         f"# {skill}: settings (Layer 2)\n"
         "\n"
-        "Created for this client's instance. Questions are added one by one after the client confirms.\n"
+        "Created for this client's instance. Every question here was confirmed by the client.\n"
         "\n"
         "## Standards\n"
         "| Setting | Standard |\n"

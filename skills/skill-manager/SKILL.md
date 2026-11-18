@@ -47,8 +47,24 @@ line without quotes.
 4. **Dry run** the exact commands. If one is refused, explain why in plain words and propose another way.
 5. **Only after a clear yes**, run the same commands with `--apply`. Then say in one sentence what is now different.
 
+## Schedules (a skill that must run by itself)
+
+A skill does not run on its own. Making it run at set times is a separate OpenClaw automation, outside `lk`: no dry
+run, no rollback, and every run uses the AI service (it costs money each time).
+
+1. **Separate question.** Create the skill first. Then, as its own question, say when it would run and that each run
+   uses the AI service, e.g. "Should I also schedule it to run every Friday at 17:00? Each run uses the AI service."
+   Only a yes to that exact question allows scheduling. A yes to the skill is not a yes to the schedule.
+2. **One source of truth.** Take the day and time from the skill's `client-config.md` answer, and name the
+   automation exactly like the skill, so it can be found again.
+3. **Keep them together.** When a schedule answer changes, propose changing the automation in the same question,
+   and update both after the yes. When removing a skill, look for an automation with the skill's name; if there is
+   one, say it will stop too and remove it in the same step.
+4. **Say what exists.** After scheduling, say when the first run happens and that the client can ask to stop it.
+
 ## Never
 
 - Apply anything the client did not confirm in this conversation.
+- Create, change or remove an automation unless the client said yes to a question that named it (see Schedules).
 - Use `--discard-answer(s)` unless the client agreed, after you told them, that their answers will be lost.
 - Remove or rewrite a skill that came from operator (the tool refuses: say so plainly). Changes are for this client only.
