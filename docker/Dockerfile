@@ -1,0 +1,25 @@
+# OpenClaw gateway with claw-skills-kit and the skill-manager skill baked in.
+# Build from the repository root:  docker build -f docker/Dockerfile -t csk-openclaw:local .
+FROM ghcr.io/openclaw/openclaw:2026.11.3
+
+# The image ships Python 3.11; claw-skills-kit needs >= 3.12. uv installs its own Python next to the kit,
+# so the image's Python is left alone.
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /usr/local/bin/uv
+
+USER root
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python \
+    UV_NO_CACHE=1
+COPY pyproject.toml README.md /opt/claw-skills-kit/pkg/
+COPY src /opt/claw-skills-kit/pkg/src
+RUN uv venv /opt/claw-skills-kit/venv --python 3.14 \
+ && uv pip install --python /opt/claw-skills-kit/venv/bin/python /opt/claw-skills-kit/pkg \
+ && /opt/claw-skills-kit/venv/bin/python -m claw_skills_kit --help > /dev/null
+
+COPY skills/skill-manager /opt/claw-skills-kit/skill-manager
+COPY host/AGENTS.csk.md /opt/claw-skills-kit/AGENTS.csk.md
+COPY docker/bootstrap.sh docker/apply_agents_rules.py /opt/claw-skills-kit/
+RUN chmod 0755 /opt/claw-skills-kit/bootstrap.sh /opt/claw-skills-kit/skill-manager/scripts/lk
+
+# skill-manager's `lk` uses this interpreter when it is set (no repository checkout in the container).
+ENV CSK_PYTHON=/opt/claw-skills-kit/venv/bin/python
+USER node

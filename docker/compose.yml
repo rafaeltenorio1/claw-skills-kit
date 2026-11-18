@@ -1,0 +1,28 @@
+# OpenClaw gateway for the operator project, with claw-skills-kit and skill-manager inside.
+# Use docker/up.sh (build, bootstrap, start, checks). Secrets come from an env file outside the repository.
+name: csk
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: csk-openclaw:local
+    env_file:
+      - path: ${CSK_ENV_FILE:-${HOME}/.config/csk/openclaw-test.env}
+        required: true
+    environment:
+      CSK_HOST_PORT: ${CSK_HOST_PORT:-18790}
+      TZ: America/Sao_Paulo
+      OPENCLAW_DISABLE_BONJOUR: "1"
+    ports:
+      - "127.0.0.1:${CSK_HOST_PORT:-18790}:18789"  # host loopback only
+    volumes:
+      - state:/home/node/.openclaw
+    healthcheck:  # the image's own check; its 180s interval leaves the status at "starting" for minutes
+      interval: 30s
+      start_period: 90s
+    restart: unless-stopped
+
+volumes:
+  state:
