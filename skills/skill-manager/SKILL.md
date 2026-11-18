@@ -24,7 +24,7 @@ line. Without `--apply` it is a dry run that changes nothing.
 | New question | `lk question add $SKILLS/<skill> --key <key> --suggested "<hint>" [--answer "<value>"]` |
 | New answer / new hint | `lk question change $SKILLS/<skill> --key <key> [--answer "<value>"] [--suggested "<hint>"]` |
 | Remove question | `lk question remove $SKILLS/<skill> --key <key> [--discard-answer]` |
-| New skill | `lk skill create $SKILLS --name <name> --description "<one line>" --instructions-file - <<'EOF'` (body lines, then `EOF`) |
+| New skill | `lk skill create $SKILLS --name <name> --description "<one line>" --question <key> "<hint>" ["<value>"] ... --instructions-file - <<'EOF'` (body lines, then `EOF`) |
 | Remove skill | `lk skill remove $SKILLS --name <name> [--discard-answers]` |
 
 Always pass a skill's instructions through stdin with a quoted heredoc (`<<'EOF'`), never inside quotes on the
@@ -38,7 +38,9 @@ line without quotes.
    - To change how an existing skill works for this client (a standard or a setting), add questions whose key
      starts with the setting it overrides, e.g. `schedule.interval_days`, `schedule.time`.
    - New skill: name in lowercase-with-hyphens; short instructions that read their own `client-config.md`;
-     then add the questions it needs to do the job well, one `question add` each.
+     and the questions it needs to do the job well, all in the same `skill create` call: one
+     `--question <key> "<hint>" ["<value>"]` each (value only if the client gave it). Never create the skill first
+     and add its questions with `question add` afterwards: the dry run could not check them.
    - Ask for any answer you need; never invent the client's answers. A suggestion is fine.
 3. **Propose and ask.** Say what will change in one or two plain sentences and ask yes or no.
    Example: "Today the cleaning runs every day at 8:00. Should it run every 7 days at 8:00 instead?"

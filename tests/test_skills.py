@@ -193,6 +193,41 @@ def test_cli_create_reads_instructions_from_stdin_with_a_dash(capsys, monkeypatc
     assert body in (skills_dir / "x/SKILL.md").read_text(encoding="utf-8")
 
 
+def test_cli_create_writes_the_questions_with_the_skill_in_one_apply(capsys, skills_dir):
+    base = ["create", str(skills_dir), "--name", "weekly", "--description", "d", "--instructions", "# B",
+            "--question", "schedule.time", "Monday 8:00", "Monday 9:00",
+            "--question", "critical_senders", "Clients and the accountant"]
+    code, out = run(capsys, *base)
+    assert (code, out["status"], out["questions"]) == (0, "planned", ["schedule.time", "critical_senders"])
+    assert not (skills_dir / "weekly").exists()
+    code, out = run(capsys, *base, "--apply")
+    assert (code, out["status"]) == (0, "applied")
+    assert "Monday 9:00" not in json.dumps(out)  # report has keys, never answer values
+    t = parse_template((skills_dir / "weekly/client-config.md").read_text(encoding="utf-8"))
+    assert [(f.key, f.comes_from, f.suggested, f.answer) for f in t.fields] == [
+        ("schedule.time", "Instance", "Monday 8:00", "Monday 9:00"),
+        ("critical_senders", "Instance", "Clients and the accountant", ""),
+    ]
+
+
+@pytest.mark.parametrize(
+    "questions, status",
+    [
+        ([["k", "s"], ["k", "s2"]], "question_exists"),  # same key twice
+        ([["k", "a|b"]], "invalid_question"),  # would break the table
+        ([["k"]], "invalid_question"),  # missing the suggestion
+        ([["k", "s", "a", "extra"]], "invalid_question"),
+    ],
+)
+def test_cli_create_refuses_bad_questions_and_writes_nothing(capsys, skills_dir, questions, status):
+    argv = ["create", str(skills_dir), "--name", "weekly", "--description", "d", "--instructions", "# B", "--apply"]
+    for q in questions:
+        argv += ["--question", *q]
+    code, out = run(capsys, *argv)
+    assert (code, out["status"]) == (13, status)
+    assert not (skills_dir / "weekly").exists()
+
+
 def test_cli_create_refuses_stdin_that_is_not_utf8(capsys, monkeypatch, skills_dir):
     monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b"\xff\xfe bad"), encoding="latin-1"))
     code, out = run(capsys, "create", str(skills_dir), "--name", "x", "--description", "d",

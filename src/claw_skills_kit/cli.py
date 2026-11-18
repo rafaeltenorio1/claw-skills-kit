@@ -4,7 +4,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from claw_skills_kit.skills import SkillError, apply_plan, plan_create, plan_remove
+from claw_skills_kit.skills import NewQuestion, SkillError, apply_plan, plan_create, plan_remove
 from claw_skills_kit.questions import QuestionError, add_question, change_question, remove_question
 from claw_skills_kit.interview import InterviewError, apply_answers, load_answers, missing_required
 from claw_skills_kit.reconcile import ReconcileError, compute_revisions, reconcile
@@ -156,6 +156,10 @@ def _build_parser() -> argparse.ArgumentParser:
     body.add_argument("--instructions", help="SKILL.md body (Markdown).")
     body.add_argument(
         "--instructions-file", type=Path, help="File holding the SKILL.md body; '-' reads it from stdin."
+    )
+    create.add_argument(
+        "--question", action="append", nargs="+", default=[], metavar="VALUE",
+        help="A settings question written with the skill: KEY SUGGESTED [ANSWER]. Repeat for each question.",
     )
     create.add_argument("--apply", action="store_true", help="Write the skill. Without it nothing is touched.")
     remove = s_sub.add_parser("remove", help="Remove a skill that was created on this instance.")
@@ -362,6 +366,15 @@ def _run_question(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _new_question(values: list[str]) -> NewQuestion:
+    if len(values) not in (2, 3):
+        raise _Refusal(
+            "invalid_question", EXIT_QUESTION,
+            error=f"--question takes KEY SUGGESTED [ANSWER]; got {len(values)} value(s).",
+        )
+    return NewQuestion(*values)
+
+
 def _run_skill(args: argparse.Namespace) -> int:
     _require_dir(args.skills_dir, "skills folder")
     skills = LocalHost(args.skills_dir)
@@ -375,17 +388,21 @@ def _run_skill(args: argparse.Namespace) -> int:
                 )
             else:
                 instructions = args.instructions
-            plan = plan_create(skills, args.name, args.description, instructions)
+            questions = [_new_question(values) for values in args.question]
+            plan = plan_create(skills, args.name, args.description, instructions, questions)
         else:
             plan = plan_remove(skills, args.name, discard_answers=args.discard_answers)
         if args.apply:
             apply_plan(skills, plan)
     except SkillError as exc:
         raise _Refusal(exc.status, _SKILL_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+    except QuestionError as exc:
+        raise _Refusal(exc.status, _QUESTION_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
 
+    # keys only, never answer values
     _emit({
         "ok": True, "status": "applied" if args.apply else "planned", "action": plan.action,
-        "skill": plan.name, "files": sorted(plan.files),
+        "skill": plan.name, "files": sorted(plan.files), "questions": list(plan.questions),
         "discarded_answers": plan.had_answers and args.apply,
     })
     return EXIT_OK

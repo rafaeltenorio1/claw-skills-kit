@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from claw_skills_kit.questions import add_question
 from claw_skills_kit.reconciler.host import Host
 from claw_skills_kit.reconciler.layout import ANSWERS_FILE, SKILL_FILE
 from claw_skills_kit.template_format import TemplateFormatError, new_client_config, parse_template
@@ -36,6 +38,14 @@ class SkillPlan:
     action: str  # create | remove
     files: dict[str, bytes | None]  # path -> new content (create) or None (remove)
     had_answers: bool = False
+    questions: tuple[str, ...] = ()  # create only: keys of the questions written with the skill
+
+
+@dataclass(frozen=True)
+class NewQuestion:
+    key: str
+    suggested: str
+    answer: str = ""
 
 
 def _check_name(name: str) -> str:
@@ -81,15 +91,29 @@ def is_instance_skill(skill_md: str) -> bool:
     return False
 
 
-def plan_create(skills: Host, name: str, description: str, instructions: str) -> SkillPlan:
+def plan_create(
+    skills: Host,
+    name: str,
+    description: str,
+    instructions: str,
+    questions: Sequence[NewQuestion] = (),
+) -> SkillPlan:
+    """Plan the skill and its questions together, so one dry run checks everything and one apply writes it all.
+
+    Each question goes through the same rules as `question add` (QuestionError on refusal, nothing planned).
+    """
     _check_name(name)
     if skills.files(name):
         raise SkillError("skill_exists", f"A skill called {name!r} already exists on this instance.")
+    skill_md = render_skill_md(name, description, instructions)
+    config = new_client_config(name)
+    for q in questions:
+        config = add_question(config, q.key, q.suggested, q.answer).text
     files: dict[str, bytes | None] = {
-        f"{name}/{SKILL_FILE}": render_skill_md(name, description, instructions).encode("utf-8"),
-        f"{name}/{ANSWERS_FILE}": new_client_config(name).encode("utf-8"),
+        f"{name}/{SKILL_FILE}": skill_md.encode("utf-8"),
+        f"{name}/{ANSWERS_FILE}": config.encode("utf-8"),
     }
-    return SkillPlan(name, "create", files)
+    return SkillPlan(name, "create", files, questions=tuple(q.key for q in questions))
 
 
 def plan_remove(skills: Host, name: str, *, discard_answers: bool = False) -> SkillPlan:
