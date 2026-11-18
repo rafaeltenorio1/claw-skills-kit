@@ -51,6 +51,9 @@ line without quotes.
    - Ask for any answer you need; never invent the client's answers. A suggestion is fine.
 3. **Propose and ask.** Say what will change in one or two plain sentences and ask yes or no.
    Example: "Today the cleaning runs every day at 8:00. Should it run every 7 days at 8:00 instead?"
+   Do this even when the client already gave a direct, exact instruction ("connect it to #team", "stop the
+   digest"): restate it and ask "Shall I?". Only the answer to your question is the yes. (Answers to settings
+   questions you asked are the one exception; see Unanswered questions.)
 4. **Dry run** the exact commands. If one is refused, explain why in plain words and propose another way.
 5. **Only after a clear yes**, run the same commands with `--apply`. Then say in one sentence what is now different.
 
@@ -135,7 +138,7 @@ run, no rollback, and every run uses the AI service (it costs money each time).
 
 ## Never
 
-- Apply anything the client did not confirm in this conversation.
+- Apply anything the client did not confirm in this conversation, in answer to your own question.
 - Create, change or remove an automation unless the client said yes to a question that named it (see Schedules).
 - Use `--discard-answer(s)` unless the client agreed, after you told them, that their answers will be lost.
 - Remove or rewrite a skill that came from operator (the tool refuses: say so plainly). Changes are for this client only.
