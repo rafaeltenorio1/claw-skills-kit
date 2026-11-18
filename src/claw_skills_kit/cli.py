@@ -4,10 +4,12 @@ import sys
 import traceback
 from pathlib import Path
 
+from claw_skills_kit.questions import QuestionError, add_question, change_question, remove_question
 from claw_skills_kit.interview import InterviewError, apply_answers, load_answers, missing_required
 from claw_skills_kit.reconcile import ReconcileError, compute_revisions, reconcile
 from claw_skills_kit.reconciler.descriptor import DescriptorError, load_descriptor
 from claw_skills_kit.reconciler.host import LocalHost
+from claw_skills_kit.reconciler.layout import ANSWERS_FILE
 from claw_skills_kit.reconciler.lockfile import LockfileError, dump_pins, load_pins
 from claw_skills_kit.reconciler.smoke import CommandCheck
 from claw_skills_kit.template_format import FillError, TemplateFormatError, fill_answers, parse_template
@@ -24,6 +26,18 @@ EXIT_PIN = 9
 EXIT_INVALID_INPUT = 10
 EXIT_SKILL = 11
 EXIT_EXISTING_CONFIG = 12
+EXIT_QUESTION = 13
+EXIT_ANSWER_WOULD_BE_LOST = 14
+
+# QuestionError.status -> exit code.
+_QUESTION_CODES = {
+    "question_exists": EXIT_QUESTION,
+    "question_not_found": EXIT_QUESTION,
+    "golden_question": EXIT_QUESTION,
+    "invalid_question": EXIT_QUESTION,
+    "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
+    "invalid_existing_config": EXIT_EXISTING_CONFIG,
+}
 
 # ReconcileError.status -> exit code. A status not listed here is treated as a bug (exit 1).
 _REFUSAL_CODES = {
@@ -95,6 +109,28 @@ def _build_parser() -> argparse.ArgumentParser:
     rec_parser.add_argument(
         "--apply", action="store_true", help="Write the changes. Without it nothing is touched."
     )
+
+    q_parser = subparsers.add_parser(
+        "question",
+        help="Add, change or remove a question in one client's client-config.md (dry run unless --apply).",
+    )
+    q_sub = q_parser.add_subparsers(dest="action", required=True)
+    for action, help_text in (
+        ("add", "Add an instance-only question."),
+        ("change", "Change an instance question, or only the answer of a golden one."),
+        ("remove", "Remove an instance-only question."),
+    ):
+        a = q_sub.add_parser(action, help=help_text)
+        a.add_argument("skill_dir", type=Path, help="The skill folder on the host (holds client-config.md).")
+        a.add_argument("--key", required=True, help="Setting name (first column).")
+        if action in ("add", "change"):
+            a.add_argument("--suggested", required=action == "add", help="Suggested answer / question hint.")
+            a.add_argument("--answer", help="The client's answer (Value column).")
+        if action == "remove":
+            a.add_argument(
+                "--discard-answer", action="store_true", help="Allow removing a question that has an answer."
+            )
+        a.add_argument("--apply", action="store_true", help="Write the change. Without it nothing is touched.")
     return parser
 
 
@@ -112,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_fill(parser, args.skill_dir, args.answers, args.out)
         if args.command == "lock":
             return _run_lock(args.library, args.skills, args.out)
+        if args.command == "question":
+            return _run_question(args)
         if args.command == "reconcile":
             return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply)
         parser.error(f"Unknown command: {args.command}")
@@ -248,3 +286,33 @@ def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path
     code = {"rolled_back": EXIT_ROLLED_BACK, "rollback_failed": EXIT_ROLLBACK_FAILED}.get(report.status, EXIT_OK)
     _emit({"ok": code == EXIT_OK, **report.to_dict()})
     return code
+
+
+def _run_question(args: argparse.Namespace) -> int:
+    config_path = args.skill_dir / ANSWERS_FILE
+    if not config_path.is_file():
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error=f"No {ANSWERS_FILE} in {args.skill_dir}")
+    text = _read_utf8(config_path, "invalid_existing_config", EXIT_EXISTING_CONFIG, ANSWERS_FILE)
+    try:
+        if args.action == "add":
+            edit = add_question(text, args.key, args.suggested, args.answer or "")
+        elif args.action == "change":
+            edit = change_question(text, args.key, suggested=args.suggested, answer=args.answer)
+        else:
+            edit = remove_question(text, args.key, discard_answer=args.discard_answer)
+    except QuestionError as exc:
+        raise _Refusal(exc.status, _QUESTION_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+
+    if edit.text == text:
+        status, changed = "unchanged", False
+    elif args.apply:
+        changed = _write_if_changed(config_path, edit.text.encode("utf-8"))
+        status = "applied"
+    else:
+        status, changed = "planned", False
+    # keys only, never answer values
+    _emit({
+        "ok": True, "status": status, "changed": changed, "action": edit.action, "key": edit.key,
+        "discarded_answer": edit.had_answer and status == "applied", "out": str(config_path),
+    })
+    return EXIT_OK

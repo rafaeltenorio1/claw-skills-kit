@@ -294,3 +294,49 @@ def append_fields(text: str, fields: Sequence[Field]) -> str:
     result = "".join(lines)
     parse_template(result)  # raises TemplateFormatError if the new rows break the document
     return result
+
+
+_SUGGESTED_COLUMN = 2
+
+
+def _find_row(table: _Table, key: str) -> int:
+    for line_no, cells in table.rows:
+        if cells[0] == key:
+            return line_no
+    raise FillError(f"Setting {key!r} is not in the client answers.")
+
+
+def _set_cell(line: str, column: int, value: str) -> str:
+    body = line.rstrip("\r\n")
+    ending = line[len(body):]
+    parts = body.split("|")
+    parts[column + 1] = f" {value} " if value else " "
+    return "|".join(parts) + ending
+
+
+def update_field(text: str, key: str, *, suggested: str | None = None, answer: str | None = None) -> str:
+    """Change the suggested answer and/or the value of one row; every other byte stays the same."""
+    for value in (suggested, answer):
+        if value is not None and not _fits_in_a_cell(value.strip()):
+            raise FillError(f"Setting {key!r}: cells cannot contain '|' or line breaks.")
+    table = _read_answers_table(text)
+    line_no = _find_row(table, key)
+    lines = text.splitlines(keepends=True)
+    if suggested is not None:
+        lines[line_no - 1] = _set_cell(lines[line_no - 1], _SUGGESTED_COLUMN, suggested.strip())
+    if answer is not None:
+        lines[line_no - 1] = _set_cell(lines[line_no - 1], _VALUE_COLUMN, answer.strip())
+    return "".join(lines)
+
+
+def remove_field(text: str, key: str) -> str:
+    """Delete one row of the client answers table; every other byte stays the same."""
+    table = _read_answers_table(text)
+    line_no = _find_row(table, key)
+    lines = text.splitlines(keepends=True)
+    removed = lines.pop(line_no - 1)
+    if line_no - 1 == len(lines) and not removed.endswith("\n") and lines:
+        # the removed row was the last line with no final newline: keep the file without one
+        prev = lines[-1]
+        lines[-1] = prev.rstrip("\r\n")
+    return "".join(lines)
