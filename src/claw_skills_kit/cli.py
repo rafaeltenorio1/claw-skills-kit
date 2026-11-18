@@ -154,7 +154,9 @@ def _build_parser() -> argparse.ArgumentParser:
     create.add_argument("--description", required=True, help="One line: what the skill does.")
     body = create.add_mutually_exclusive_group(required=True)
     body.add_argument("--instructions", help="SKILL.md body (Markdown).")
-    body.add_argument("--instructions-file", type=Path, help="File holding the SKILL.md body.")
+    body.add_argument(
+        "--instructions-file", type=Path, help="File holding the SKILL.md body; '-' reads it from stdin."
+    )
     create.add_argument("--apply", action="store_true", help="Write the skill. Without it nothing is touched.")
     remove = s_sub.add_parser("remove", help="Remove a skill that was created on this instance.")
     remove.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
@@ -201,6 +203,14 @@ def _read_utf8(path: Path, status: str, code: int, what: str) -> str:
         return path.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise _Refusal(status, code, error=f"Cannot read {what}: {exc}") from None
+
+
+def _read_stdin_utf8(status: str, code: int, what: str) -> str:
+    """Text piped in by the caller (e.g. a heredoc), so long text needs no shell quoting."""
+    try:
+        return sys.stdin.buffer.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError, AttributeError) as exc:
+        raise _Refusal(status, code, error=f"Cannot read {what} from stdin: {exc}") from None
 
 
 def _write_if_changed(path: Path, data: bytes) -> bool:
@@ -357,7 +367,9 @@ def _run_skill(args: argparse.Namespace) -> int:
     skills = LocalHost(args.skills_dir)
     try:
         if args.action == "create":
-            if args.instructions_file is not None:
+            if args.instructions_file == Path("-"):
+                instructions = _read_stdin_utf8("invalid_input", EXIT_INVALID_INPUT, "instructions")
+            elif args.instructions_file is not None:
                 instructions = _read_utf8(
                     args.instructions_file, "invalid_input", EXIT_INVALID_INPUT, "instructions file"
                 )

@@ -24,8 +24,12 @@ line. Without `--apply` it is a dry run that changes nothing.
 | New question | `lk question add $SKILLS/<skill> --key <key> --suggested "<hint>" [--answer "<value>"]` |
 | New answer / new hint | `lk question change $SKILLS/<skill> --key <key> [--answer "<value>"] [--suggested "<hint>"]` |
 | Remove question | `lk question remove $SKILLS/<skill> --key <key> [--discard-answer]` |
-| New skill | `lk skill create $SKILLS --name <name> --description "<one line>" --instructions "<markdown>"` |
+| New skill | `lk skill create $SKILLS --name <name> --description "<one line>" --instructions-file - <<'EOF'` (body lines, then `EOF`) |
 | Remove skill | `lk skill remove $SKILLS --name <name> [--discard-answers]` |
+
+Always pass a skill's instructions through stdin with a quoted heredoc (`<<'EOF'`), never inside quotes on the
+command line: apostrophes, quotes and `$` in the text then need no escaping. Use `--instructions` only for one short
+line without quotes.
 
 ## Every request, in this order
 

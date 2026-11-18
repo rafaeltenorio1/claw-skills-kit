@@ -1,3 +1,4 @@
+import io
 import json
 from pathlib import Path
 
@@ -181,6 +182,22 @@ def test_cli_create_from_an_instructions_file(capsys, skills_dir, tmp_path):
     code, _ = run(capsys, "create", str(skills_dir), "--name", "x", "--description", "d",
                   "--instructions-file", str(f), "--apply")
     assert code == 0 and "# From file" in (skills_dir / "x/SKILL.md").read_text()
+
+
+def test_cli_create_reads_instructions_from_stdin_with_a_dash(capsys, monkeypatch, skills_dir):
+    body = "# Weekly\n\nRead this client's client-config.md \"first\" — then $HOME stays literal.\n"
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(body.encode("utf-8")), encoding="utf-8"))
+    code, out = run(capsys, "create", str(skills_dir), "--name", "x", "--description", "d",
+                    "--instructions-file", "-", "--apply")
+    assert (code, out["status"]) == (0, "applied")
+    assert body in (skills_dir / "x/SKILL.md").read_text(encoding="utf-8")
+
+
+def test_cli_create_refuses_stdin_that_is_not_utf8(capsys, monkeypatch, skills_dir):
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(b"\xff\xfe bad"), encoding="latin-1"))
+    code, out = run(capsys, "create", str(skills_dir), "--name", "x", "--description", "d",
+                    "--instructions-file", "-")
+    assert (code, out["status"]) == (10, "invalid_input") and not (skills_dir / "x").exists()
 
 
 @pytest.mark.parametrize(
