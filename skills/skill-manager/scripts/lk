@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Runs the claw-skills-kit CLI from its project folder. Set CSK_DIR if the project lives elsewhere.
+exec uv run --quiet --project "${CSK_DIR:-$HOME/projects/claw-skills-kit}" python -m claw_skills_kit "$@"

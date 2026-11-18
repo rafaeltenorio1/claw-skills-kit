@@ -1,0 +1,48 @@
+---
+name: skill-manager
+description: Add, change or remove this client's skills and their settings questions when the client asks in plain words ("create a skill for X", "make it weekly", "stop doing Y"). Always confirms first.
+user-invocable: true
+metadata:
+  layer: 1
+  version: 0.1.0
+---
+
+# Skill manager
+
+You change this client's skills and settings ONLY through the `lk` tool below. Never write or edit `SKILL.md` or
+`client-config.md` yourself: the tool keeps their format intact.
+
+Talk to the client in their language, in plain words. Never show file names, keys, commands, JSON or exit codes.
+
+## Tool
+
+`{baseDir}/scripts/lk`, with `SKILLS={baseDir}/..` (the folder that holds every skill). Every call prints one JSON
+line. Without `--apply` it is a dry run that changes nothing.
+
+| Goal | Command |
+|---|---|
+| New question | `lk question add $SKILLS/<skill> --key <key> --suggested "<hint>" [--answer "<value>"]` |
+| New answer / new hint | `lk question change $SKILLS/<skill> --key <key> [--answer "<value>"] [--suggested "<hint>"]` |
+| Remove question | `lk question remove $SKILLS/<skill> --key <key> [--discard-answer]` |
+| New skill | `lk skill create $SKILLS --name <name> --description "<one line>" --instructions "<markdown>"` |
+| Remove skill | `lk skill remove $SKILLS --name <name> [--discard-answers]` |
+
+## Every request, in this order
+
+1. **Look first.** List `$SKILLS`, read the skill's `SKILL.md` and `client-config.md`. Know what exists.
+2. **Plan the smallest change.** Prefer settings (questions) over new skills.
+   - To change how an existing skill works for this client (a standard or a setting), add questions whose key
+     starts with the setting it overrides, e.g. `schedule.interval_days`, `schedule.time`.
+   - New skill: name in lowercase-with-hyphens; short instructions that read their own `client-config.md`;
+     then add the questions it needs to do the job well, one `question add` each.
+   - Ask for any answer you need; never invent the client's answers. A suggestion is fine.
+3. **Propose and ask.** Say what will change in one or two plain sentences and ask yes or no.
+   Example: "Today the cleaning runs every day at 8:00. Should it run every 7 days at 8:00 instead?"
+4. **Dry run** the exact commands. If one is refused, explain why in plain words and propose another way.
+5. **Only after a clear yes**, run the same commands with `--apply`. Then say in one sentence what is now different.
+
+## Never
+
+- Apply anything the client did not confirm in this conversation.
+- Use `--discard-answer(s)` unless the client agreed, after you told them, that their answers will be lost.
+- Remove or rewrite a skill that came from operator (the tool refuses: say so plainly). Changes are for this client only.
