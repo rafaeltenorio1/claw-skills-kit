@@ -340,3 +340,22 @@ def remove_field(text: str, key: str) -> str:
         prev = lines[-1]
         lines[-1] = prev.rstrip("\r\n")
     return "".join(lines)
+
+
+def new_client_config(skill: str) -> str:
+    """An empty client-config.md for a skill created on one instance: no standards, no questions yet."""
+    text = (
+        f"# {skill}: settings (Layer 2)\n"
+        "\n"
+        "Created for this client's instance. Questions are added one by one after the client confirms.\n"
+        "\n"
+        "## Standards\n"
+        "| Setting | Standard |\n"
+        "|---|---|\n"
+        "\n"
+        "## Client answers\n"
+        "| Setting | Comes from | Suggested answer | Value |\n"
+        "|---|---|---|---|\n"
+    )
+    parse_template(text)  # the empty document must already be valid
+    return text

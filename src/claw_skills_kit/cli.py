@@ -4,6 +4,7 @@ import sys
 import traceback
 from pathlib import Path
 
+from claw_skills_kit.skills import SkillError, apply_plan, plan_create, plan_remove
 from claw_skills_kit.questions import QuestionError, add_question, change_question, remove_question
 from claw_skills_kit.interview import InterviewError, apply_answers, load_answers, missing_required
 from claw_skills_kit.reconcile import ReconcileError, compute_revisions, reconcile
@@ -37,6 +38,17 @@ _QUESTION_CODES = {
     "invalid_question": EXIT_QUESTION,
     "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
     "invalid_existing_config": EXIT_EXISTING_CONFIG,
+}
+
+# SkillError.status -> exit code.
+_SKILL_CODES = {
+    "invalid_skill": EXIT_SKILL,
+    "skill_exists": EXIT_SKILL,
+    "skill_not_found": EXIT_SKILL,
+    "golden_skill": EXIT_SKILL,
+    "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
+    "rolled_back": EXIT_ROLLED_BACK,
+    "rollback_failed": EXIT_ROLLBACK_FAILED,
 }
 
 # ReconcileError.status -> exit code. A status not listed here is treated as a bug (exit 1).
@@ -131,6 +143,26 @@ def _build_parser() -> argparse.ArgumentParser:
                 "--discard-answer", action="store_true", help="Allow removing a question that has an answer."
             )
         a.add_argument("--apply", action="store_true", help="Write the change. Without it nothing is touched.")
+
+    s_parser = subparsers.add_parser(
+        "skill", help="Create or remove a skill on one client's instance (dry run unless --apply)."
+    )
+    s_sub = s_parser.add_subparsers(dest="action", required=True)
+    create = s_sub.add_parser("create", help="Create a skill with SKILL.md and an empty client-config.md.")
+    create.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
+    create.add_argument("--name", required=True, help="Skill name: lowercase letters, digits, hyphens.")
+    create.add_argument("--description", required=True, help="One line: what the skill does.")
+    body = create.add_mutually_exclusive_group(required=True)
+    body.add_argument("--instructions", help="SKILL.md body (Markdown).")
+    body.add_argument("--instructions-file", type=Path, help="File holding the SKILL.md body.")
+    create.add_argument("--apply", action="store_true", help="Write the skill. Without it nothing is touched.")
+    remove = s_sub.add_parser("remove", help="Remove a skill that was created on this instance.")
+    remove.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
+    remove.add_argument("--name", required=True)
+    remove.add_argument(
+        "--discard-answers", action="store_true", help="Allow removing a skill whose questions have answers."
+    )
+    remove.add_argument("--apply", action="store_true", help="Delete the skill. Without it nothing is touched.")
     return parser
 
 
@@ -148,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_fill(parser, args.skill_dir, args.answers, args.out)
         if args.command == "lock":
             return _run_lock(args.library, args.skills, args.out)
+        if args.command == "skill":
+            return _run_skill(args)
         if args.command == "question":
             return _run_question(args)
         if args.command == "reconcile":
@@ -314,5 +348,32 @@ def _run_question(args: argparse.Namespace) -> int:
     _emit({
         "ok": True, "status": status, "changed": changed, "action": edit.action, "key": edit.key,
         "discarded_answer": edit.had_answer and status == "applied", "out": str(config_path),
+    })
+    return EXIT_OK
+
+
+def _run_skill(args: argparse.Namespace) -> int:
+    _require_dir(args.skills_dir, "skills folder")
+    skills = LocalHost(args.skills_dir)
+    try:
+        if args.action == "create":
+            if args.instructions_file is not None:
+                instructions = _read_utf8(
+                    args.instructions_file, "invalid_input", EXIT_INVALID_INPUT, "instructions file"
+                )
+            else:
+                instructions = args.instructions
+            plan = plan_create(skills, args.name, args.description, instructions)
+        else:
+            plan = plan_remove(skills, args.name, discard_answers=args.discard_answers)
+        if args.apply:
+            apply_plan(skills, plan)
+    except SkillError as exc:
+        raise _Refusal(exc.status, _SKILL_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+
+    _emit({
+        "ok": True, "status": "applied" if args.apply else "planned", "action": plan.action,
+        "skill": plan.name, "files": sorted(plan.files),
+        "discarded_answers": plan.had_answers and args.apply,
     })
     return EXIT_OK
