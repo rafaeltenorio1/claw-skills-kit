@@ -19,6 +19,10 @@ Talk to the client in their language, in plain words. Never show file names, key
 `{baseDir}/scripts/lk`, with `SKILLS={baseDir}/..` (the folder that holds every skill). Every call prints one JSON
 line. Without `--apply` it is a dry run that changes nothing.
 
+Run every `lk` call in the foreground and wait for its JSON: call exec with `yieldMs: 120000`. Some calls (an update,
+connecting an integration) run checks for more than 10 seconds, and exec's default would move them to the
+background; what you tell the client must come from the finished result, in the same turn.
+
 | Goal | Command |
 |---|---|
 | New question | `lk question add $SKILLS/<skill> --key <key> --suggested "<hint>" [--answer "<value>"]` |
