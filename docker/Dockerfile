@@ -19,10 +19,14 @@ RUN uv venv /opt/claw-skills-kit/venv --python 3.14 \
  && /opt/claw-skills-kit/venv/bin/python -m claw_skills_kit --help > /dev/null
 
 COPY skills/skill-manager /opt/claw-skills-kit/skill-manager
+# The golden skill library, one folder per release with its pins. Owned by root: the agent can read, not edit.
+COPY library /opt/claw-skills-kit/library
 COPY host/AGENTS.csk.md /opt/claw-skills-kit/AGENTS.csk.md
 COPY docker/bootstrap.sh docker/apply_agents_rules.py /opt/claw-skills-kit/
 RUN chmod 0755 /opt/claw-skills-kit/bootstrap.sh /opt/claw-skills-kit/skill-manager/scripts/lk
 
 # skill-manager's `lk` uses this interpreter when it is set (no repository checkout in the container).
-ENV CSK_PYTHON=/opt/claw-skills-kit/venv/bin/python
+ENV CSK_PYTHON=/opt/claw-skills-kit/venv/bin/python \
+    CSK_RELEASES=/opt/claw-skills-kit/library/releases \
+    CSK_HOST=/home/node/.openclaw/csk/host.json
 USER node

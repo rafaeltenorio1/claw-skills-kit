@@ -1,6 +1,6 @@
 ---
 name: skill-manager
-description: Add, change or remove this client's skills and their settings questions when the client asks in plain words ("create a skill for X", "make it weekly", "stop doing Y"). Always confirms first.
+description: Add, change or remove skills and their settings, answer setup questions, and install operator skill updates. Always asks first.
 user-invocable: true
 metadata:
   layer: 1
@@ -47,6 +47,47 @@ line without quotes.
 4. **Dry run** the exact commands. If one is refused, explain why in plain words and propose another way.
 5. **Only after a clear yes**, run the same commands with `--apply`. Then say in one sentence what is now different.
 
+## Unanswered questions (the interview)
+
+Each operator skill has an `interview.md`: at most three questions, each with a suggested answer and the setting it
+fills ("Fills"). A skill with blank answers cannot do its job well.
+
+1. When a skill has blank answers (after an install or an update, or when the client asks to set a skill up), ask
+   its `interview.md` questions in one message, in plain words, each with its suggestion.
+2. Asking the question is the proposal; the client's answer is the yes for saving that answer. Save each one with
+   `lk question change $SKILLS/<skill> --key "<Fills>" --answer "<answer>"`: dry run, then `--apply`.
+   Then say in one sentence what is now saved. Quote the key: some contain spaces.
+3. An answer must fit on one line and cannot contain `|`. Rephrase it into one line and read it back before saving.
+
+## operator skill updates (only when `CSK_RELEASES` is set)
+
+operator publishes its skills in releases. Each `$CSK_RELEASES/<release>/` holds `skills/`, `skills.lock.json`
+(the pinned revisions) and `RELEASE.md` (what changed, in plain words). `$CSK_HOST` describes this host: its one
+client and the operator skills it runs. The reconciler installs a release: it keeps the client's answers and their
+own questions, runs a quick check of the assistant, and puts every file back if the check fails.
+
+When the client asks if there are updates, or asks to update:
+
+1. **Dry run against the newest release.**
+   `REL="$CSK_RELEASES/$(ls "$CSK_RELEASES" | sort | tail -n 1)"`, then
+   `lk reconcile --host "$CSK_HOST" --library "$REL/skills" --target $SKILLS --pins "$REL/skills.lock.json"`.
+2. **`unchanged`**: say in one sentence that everything is up to date. Stop.
+3. **`planned`**: read `$REL/RELEASE.md` and, for each skill in `changes`, its `lineage.md` in `$REL/skills/`.
+   Tell the client, in plain words:
+   - which skills change and what gets better (from the notes, not from file names);
+   - that their answers are kept;
+   - which new questions the update brings (keys in `pending_answers` that are not in the skill's current
+     `client-config.md`);
+   - for every key in `removed_answers`: that this answer will be lost, and ask about it explicitly.
+   Then ask yes or no, and say that a quick check runs and that nothing changes if it fails.
+4. **Only after a clear yes**, run the same command with `--apply`, and read `status`:
+   - `applied`: say it is done. If the update brought new questions, ask them now (Unanswered questions above).
+   - `rolled_back` (exit 6): the check failed and every file was put back. Say the update did not go in, nothing
+     changed, and that operator needs to look at that release. Do not try again.
+   - `rollback_failed` (exit 7): say a person at operator must check this assistant now. Do not try again.
+   - A refusal (exit 8 to 12): explain in one sentence, in plain words, and stop. Never work around it.
+5. Never install an older release than the one running unless the client names it and agrees it is a downgrade.
+
 ## Schedules (a skill that must run by itself)
 
 A skill does not run on its own. Making it run at set times is a separate OpenClaw automation, outside `lk`: no dry
@@ -68,3 +109,4 @@ run, no rollback, and every run uses the AI service (it costs money each time).
 - Create, change or remove an automation unless the client said yes to a question that named it (see Schedules).
 - Use `--discard-answer(s)` unless the client agreed, after you told them, that their answers will be lost.
 - Remove or rewrite a skill that came from operator (the tool refuses: say so plainly). Changes are for this client only.
+- Edit the operator library, its pins, or this host's description. They are the operator's, not the client's.
