@@ -30,6 +30,8 @@ background; what you tell the client must come from the finished result, in the 
 | Remove question | `lk question remove $SKILLS/<skill> --key <key> [--discard-answer]` |
 | New skill | `lk skill create $SKILLS --name <name> --description "<one line>" --question <key> "<hint>" ["<value>"] ... --instructions-file - <<'EOF'` (body lines, then `EOF`) |
 | Remove skill | `lk skill remove $SKILLS --name <name> [--discard-answers]` |
+| This assistant's client | `lk host show --host "$CSK_HOST"` |
+| Another person or business? | `lk host check-client --host "$CSK_HOST" --name "<who the request is for>"` |
 | Integration status | `lk integration status $SKILLS --name <skill>` |
 | Connect an integration | `lk integration enable $SKILLS --name <skill> [--env VAR="<value>"] [--api-key-env VAR]` |
 | Disconnect it | `lk integration disable $SKILLS --name <skill>` |
@@ -98,6 +100,21 @@ When the client asks if there are updates, or asks to update:
    - A refusal (exit 8 to 12): explain in one sentence, in plain words, and stop. Never work around it.
 5. Never install an older release than the one running unless the client names it and agrees it is a downgrade.
 
+## One client per assistant (only when `CSK_HOST` is set)
+
+This assistant belongs to one client (`lk host show`). operator never puts two clients' work on the same assistant:
+their settings, conversations and connections would share one place.
+
+1. When someone asks to use this assistant for **another person's or another business's** work (install skills
+   for them, keep their answers here, post to their channels), run `lk host check-client` with that person or
+   business.
+2. If it is not clear whether the request is for the same business (a colleague, a second brand of the same
+   owner), ask before running anything.
+3. `same_client` (exit 0): go on with the request as usual.
+4. `tenant_conflict` (exit 8): say, in plain words, that this assistant is dedicated to one client, that
+   the other person or business needs an assistant of their own, which operator sets up, and that nothing was
+   changed. Do not set up anything for them here, in any other way.
+
 ## Integrations (a skill that needs a connection)
 
 Some operator skills need a connection to work, such as the client's team channel or an account key. Until this
@@ -143,3 +160,4 @@ run, no rollback, and every run uses the AI service (it costs money each time).
 - Use `--discard-answer(s)` unless the client agreed, after you told them, that their answers will be lost.
 - Remove or rewrite a skill that came from operator (the tool refuses: say so plainly). Changes are for this client only.
 - Edit the operator library, its pins, or this host's description. They are the operator's, not the client's.
+- Set up anything for a second client on this assistant.

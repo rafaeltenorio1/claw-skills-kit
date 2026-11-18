@@ -186,6 +186,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     remove.add_argument("--apply", action="store_true", help="Delete the skill. Without it nothing is touched.")
 
+    h_parser = subparsers.add_parser("host", help="Read this host's descriptor (read-only).")
+    h_sub = h_parser.add_subparsers(dest="action", required=True)
+    show = h_sub.add_parser("show", help="The host, its one client and its operator skills.")
+    show.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
+    check = h_sub.add_parser(
+        "check-client",
+        help="Could this gateway also serve CLIENT? Same tenant check as reconcile: exit 8 if it is another client.",
+    )
+    check.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
+    check.add_argument("--name", required=True, help="The client the request is for.")
+
     i_parser = subparsers.add_parser(
         "integration",
         help="Enable or disable a skill's integration in this gateway's config (skills.entries.<skill>).",
@@ -235,6 +246,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply)
         if args.command == "integration":
             return _run_integration(args)
+        if args.command == "host":
+            return _run_host(args)
         parser.error(f"Unknown command: {args.command}")
     except _Refusal as refusal:
         _emit({"ok": False, "status": refusal.status, **refusal.details})
@@ -509,3 +522,39 @@ def _run_integration(args: argparse.Namespace) -> int:
         "env": list(plan.env_names), "api_key_ref": plan.api_key_ref, "ready": ready,
     })
     return EXIT_OK
+
+
+def _run_host(args: argparse.Namespace) -> int:
+    """Read-only. check-client runs the reconciler's own tenant check on (this host's client + the new one)."""
+    import dataclasses
+
+    from claw_skills_kit.reconciler.descriptor import TenantConflictError, check_single_tenant
+
+    text = _read_utf8(args.host, "invalid_descriptor", EXIT_INVALID_INPUT, "host descriptor")
+    try:
+        descriptor = load_descriptor(text)
+        check_single_tenant(descriptor)
+    except TenantConflictError as exc:
+        raise _Refusal("tenant_conflict", EXIT_TENANT_CONFLICT, error=str(exc)) from None
+    except DescriptorError as exc:
+        raise _Refusal("invalid_descriptor", EXIT_INVALID_INPUT, error=str(exc)) from None
+
+    base = {"host_id": descriptor.host_id, "client": descriptor.clients[0]}
+    if args.action == "show":
+        _emit({"ok": True, "status": "ok", **base, "skills": list(descriptor.skills)})
+        return EXIT_OK
+
+    name = args.name.strip()
+    if not name:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="--name must not be empty.")
+    if name.casefold() in {c.casefold() for c in descriptor.clients}:
+        _emit({"ok": True, "status": "same_client", **base})
+        return EXIT_OK
+    try:
+        check_single_tenant(dataclasses.replace(descriptor, clients=(*descriptor.clients, name)))
+    except TenantConflictError:
+        raise _Refusal(
+            "tenant_conflict", EXIT_TENANT_CONFLICT, **base,
+            error="This gateway already serves one client; another client needs its own gateway.",
+        ) from None
+    raise AssertionError("the tenant check accepted a second client")  # a bug: reported as unexpected_error
