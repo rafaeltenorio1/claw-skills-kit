@@ -14,7 +14,14 @@ from claw_skills_kit.reconciler.hashing import revision_of, sha256_hex
 from claw_skills_kit.reconciler.host import Host
 from claw_skills_kit.reconciler.layout import ANSWERS_FILE, SKILL_FILE, TEMPLATE_FILE
 from claw_skills_kit.reconciler.smoke import Check, IntegrityCheck, SmokeResult, run_checks
-from claw_skills_kit.template_format import FillError, TemplateFormatError, fill_answers, parse_template
+from claw_skills_kit.template_format import (
+    FillError,
+    TemplateFormatError,
+    append_fields,
+    fill_answers,
+    is_instance_field,
+    parse_template,
+)
 
 
 class ReconcileError(Exception):
@@ -109,6 +116,7 @@ def _merge_answers(skill: str, template_text: str, existing: bytes | None) -> tu
 
     carried: dict[str, str] = {}
     removed: list[str] = []
+    instance_rows = []
     if existing is not None:
         try:
             old = parse_template(existing.decode("utf-8"))
@@ -119,19 +127,21 @@ def _merge_answers(skill: str, template_text: str, existing: bytes | None) -> tu
             ) from exc
         known = {f.key for f in new.fields}
         for f in old.fields:
-            if not f.answer.strip():
-                continue
-            if f.key in known:
-                carried[f.key] = f.answer
-            else:
-                removed.append(f.key)  
+            if f.key in known:  # the golden template has this question: carry the answer
+                if f.answer.strip():
+                    carried[f.key] = f.answer
+            elif is_instance_field(f) and f.key not in new.standards:
+                instance_rows.append(f)  # added for this client only: keep the whole row
+            elif f.answer.strip():
+                removed.append(f.key)
 
     try:
         merged = apply_answers(new, carried)
-        rendered = fill_answers(template_text, merged)
-    except (InterviewError, FillError) as exc:
+        rendered = append_fields(fill_answers(template_text, merged), instance_rows)
+        final = parse_template(rendered)
+    except (InterviewError, FillError, TemplateFormatError) as exc:
         raise ReconcileError("invalid_existing_config", f"Skill '{skill}': {exc}") from exc
-    pending = [f.key for f in missing_required(merged)]
+    pending = [f.key for f in missing_required(final)]
     return rendered.encode("utf-8"), pending, removed
 
 
