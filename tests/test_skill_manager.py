@@ -29,7 +29,8 @@ def test_every_command_in_the_skill_exists(command, capsys):
 def test_every_flag_in_the_skill_exists(flag, capsys):
     helps = []
     for cmd in (["question", "add"], ["question", "change"], ["question", "remove"],
-                ["skill", "create"], ["skill", "remove"], ["reconcile"]):
+                ["skill", "create"], ["skill", "remove"], ["reconcile"],
+                ["integration", "status"], ["integration", "enable"], ["integration", "disable"]):
         with pytest.raises(SystemExit):
             main([*cmd, "--help"])
         helps.append(capsys.readouterr().out)

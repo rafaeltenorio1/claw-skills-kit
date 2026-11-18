@@ -26,6 +26,9 @@ line. Without `--apply` it is a dry run that changes nothing.
 | Remove question | `lk question remove $SKILLS/<skill> --key <key> [--discard-answer]` |
 | New skill | `lk skill create $SKILLS --name <name> --description "<one line>" --question <key> "<hint>" ["<value>"] ... --instructions-file - <<'EOF'` (body lines, then `EOF`) |
 | Remove skill | `lk skill remove $SKILLS --name <name> [--discard-answers]` |
+| Integration status | `lk integration status $SKILLS --name <skill>` |
+| Connect an integration | `lk integration enable $SKILLS --name <skill> [--env VAR="<value>"] [--api-key-env VAR]` |
+| Disconnect it | `lk integration disable $SKILLS --name <skill>` |
 
 Always pass a skill's instructions through stdin with a quoted heredoc (`<<'EOF'`), never inside quotes on the
 command line: apostrophes, quotes and `$` in the text then need no escaping. Use `--instructions` only for one short
@@ -87,6 +90,29 @@ When the client asks if there are updates, or asks to update:
    - `rollback_failed` (exit 7): say a person at operator must check this assistant now. Do not try again.
    - A refusal (exit 8 to 12): explain in one sentence, in plain words, and stop. Never work around it.
 5. Never install an older release than the one running unless the client names it and agrees it is a downgrade.
+
+## Integrations (a skill that needs a connection)
+
+Some operator skills need a connection to work, such as the client's team channel or an account key. Until this
+client's gateway provides it, OpenClaw does not load the skill: it is in `$SKILLS` but not among your skills.
+Connecting it changes only this gateway's settings, never the skill.
+
+1. **Look first.** A folder in `$SKILLS` that is not among your skills may be waiting for a connection. Run
+   `lk integration status` for it: `missing_env` names what is missing. Read its `lineage.md` to say in plain words
+   what the connection is ("your team's chat channel").
+2. **A value that is not a secret** (a channel name, a region): it is the client's answer. Ask for it, then propose
+   "I will connect the team digest to #team-acme. Shall I?" After a clear yes: `lk integration enable` with
+   `--env VAR="<value>"`, dry run, then `--apply`. Say the skill is now active (`ready: true`) and offer to set up
+   its questions (Unanswered questions above).
+3. **A secret** (an API key, a token, a password; the skill's `primary_env`): never ask for it and never accept it
+   in the chat. Say that a person responsible for this assistant puts the key on the host, and that you only point
+   the skill at it. If the client pastes a secret anyway, do not use it, and tell them to replace that key because
+   it was shared in a chat. Once the key is on the host as an environment variable, and after a yes, use
+   `--api-key-env VAR` (a reference, never the value).
+4. **Results.** `applied` with `ready: true`: connected. `rolled_back` (exit 6): it could not be connected and
+   nothing changed. A refusal (exit 11 or 15): explain in one sentence and stop.
+5. **Disconnecting** is the same flow: propose, yes, `lk integration disable --apply`; say the skill stops working
+   until it is connected again.
 
 ## Schedules (a skill that must run by itself)
 

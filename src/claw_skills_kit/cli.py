@@ -29,6 +29,22 @@ EXIT_SKILL = 11
 EXIT_EXISTING_CONFIG = 12
 EXIT_QUESTION = 13
 EXIT_ANSWER_WOULD_BE_LOST = 14
+EXIT_INTEGRATION = 15
+
+# IntegrationError.status -> exit code.
+_INTEGRATION_CODES = {
+    "invalid_skill": EXIT_SKILL,
+    "skill_not_found": EXIT_SKILL,
+    "not_required": EXIT_INTEGRATION,
+    "secret_value_refused": EXIT_INTEGRATION,
+    "looks_like_secret": EXIT_INTEGRATION,
+    "no_primary_env": EXIT_INTEGRATION,
+    "invalid_integration": EXIT_INTEGRATION,
+    "config_unreadable": EXIT_INVALID_INPUT,
+    "rolled_back": EXIT_ROLLED_BACK,
+    "rollback_failed": EXIT_ROLLBACK_FAILED,
+    "openclaw_failed": EXIT_UNEXPECTED,
+}
 
 # QuestionError.status -> exit code.
 _QUESTION_CODES = {
@@ -169,6 +185,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--discard-answers", action="store_true", help="Allow removing a skill whose questions have answers."
     )
     remove.add_argument("--apply", action="store_true", help="Delete the skill. Without it nothing is touched.")
+
+    i_parser = subparsers.add_parser(
+        "integration",
+        help="Enable or disable a skill's integration in this gateway's config (skills.entries.<skill>).",
+    )
+    i_sub = i_parser.add_subparsers(dest="action", required=True)
+    for action, help_text in (
+        ("status", "Show what the skill needs and whether it loads now."),
+        ("enable", "Provide the variables the skill declares (values) and/or its API key (a reference only)."),
+        ("disable", "Remove what enable set; the skill stops loading."),
+    ):
+        p = i_sub.add_parser(action, help=help_text)
+        p.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
+        p.add_argument("--name", required=True)
+        if action == "enable":
+            p.add_argument(
+                "--env", action="append", default=[], metavar="VAR=VALUE",
+                help="A variable the skill declares in requires.env, with a value that is not a secret.",
+            )
+            p.add_argument(
+                "--api-key-env", metavar="VAR",
+                help="The environment variable that holds the skill's API key (stored as a reference, never a value).",
+            )
+        if action != "status":
+            p.add_argument("--apply", action="store_true", help="Change the config. Without it nothing is touched.")
     return parser
 
 
@@ -192,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_question(args)
         if args.command == "reconcile":
             return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply)
+        if args.command == "integration":
+            return _run_integration(args)
         parser.error(f"Unknown command: {args.command}")
     except _Refusal as refusal:
         _emit({"ok": False, "status": refusal.status, **refusal.details})
@@ -404,5 +447,65 @@ def _run_skill(args: argparse.Namespace) -> int:
         "ok": True, "status": "applied" if args.apply else "planned", "action": plan.action,
         "skill": plan.name, "files": sorted(plan.files), "questions": list(plan.questions),
         "discarded_answers": plan.had_answers and args.apply,
+    })
+    return EXIT_OK
+
+
+def _parse_env_pairs(pairs: list[str]) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for pair in pairs:
+        name, sep, value = pair.partition("=")
+        if not sep or not name:
+            raise _Refusal("invalid_integration", EXIT_INTEGRATION, error="--env takes VAR=VALUE.")
+        if name in env:
+            raise _Refusal("invalid_integration", EXIT_INTEGRATION, error=f"{name} given twice.")
+        env[name] = value
+    return env
+
+
+def _run_integration(args: argparse.Namespace) -> int:
+    from claw_skills_kit import integrations as ig  # local: the other commands never need it
+
+    _require_dir(args.skills_dir, "skills folder")
+    skill_md_path = args.skills_dir / args.name / "SKILL.md"
+    if "/" in args.name or "\\" in args.name or args.name.startswith(".") or not skill_md_path.is_file():
+        raise _Refusal("skill_not_found", EXIT_SKILL, error=f"There is no skill called {args.name!r} here.")
+    try:
+        requirements = ig.read_requirements(skill_md_path.read_text(encoding="utf-8"))
+        openclaw = ig.OpenClaw()
+        config_file = openclaw.config_file()
+        entry = ig.read_entry(config_file, args.name)
+        if args.action == "status":
+            status = ig.status_of(args.name, requirements, entry, openclaw.skill_ready(args.name))
+            _emit({
+                "ok": True, "status": "ready" if status.ready else "not_ready", "skill": args.name,
+                "required_env": list(status.required_env), "primary_env": status.primary_env,
+                "configured_env": list(status.configured_env), "api_key_ref": status.api_key_ref,
+                "missing_env": list(status.missing_env),
+            })
+            return EXIT_OK
+        if args.action == "enable":
+            plan = ig.plan_enable(
+                args.name, requirements, entry, _parse_env_pairs(args.env), args.api_key_env
+            )
+        else:
+            plan = ig.plan_disable(args.name, requirements, entry)
+        ready = None
+        if args.apply:
+            ready = ig.apply_plan(openclaw, config_file, plan)
+    except ig.IntegrationError as exc:
+        details: dict[str, object] = {"error": str(exc)}
+        if exc.unrestored:
+            details["unrestored"] = list(exc.unrestored)
+        raise _Refusal(exc.status, _INTEGRATION_CODES.get(exc.status, EXIT_UNEXPECTED), **details) from None
+
+    if not plan.changed:
+        status = "unchanged"
+    else:
+        status = "applied" if args.apply else "planned"
+    # variable names only, never values
+    _emit({
+        "ok": True, "status": status, "action": plan.action, "skill": plan.skill,
+        "env": list(plan.env_names), "api_key_ref": plan.api_key_ref, "ready": ready,
     })
     return EXIT_OK
