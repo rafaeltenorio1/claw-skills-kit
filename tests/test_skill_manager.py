@@ -14,9 +14,11 @@ def test_frontmatter_has_name_and_description_and_no_instance_mark():
     front = TEXT.split("---\n")[1]
     assert "name: skill-manager\n" in front and "\ndescription: " in front
     assert "csk_origin" not in front  # ours, not the client's: `skill remove` must refuse it
+    description = re.search(r"^description: (.+)$", front, re.M).group(1)
+    assert len(description) < 160  # the spec's limit; the agent picks the skill by this line
 
 
-@pytest.mark.parametrize("command", sorted(set(re.findall(r"`lk (\w+ \w+)", TEXT))))
+@pytest.mark.parametrize("command", sorted(set(re.findall(r"`lk (\w[\w-]*(?: \w[\w-]*)?)", TEXT))))
 def test_every_command_in_the_skill_exists(command, capsys):
     with pytest.raises(SystemExit) as exc:
         main([*command.split(), "--help"])
@@ -27,7 +29,9 @@ def test_every_command_in_the_skill_exists(command, capsys):
 def test_every_flag_in_the_skill_exists(flag, capsys):
     helps = []
     for cmd in (["question", "add"], ["question", "change"], ["question", "remove"],
-                ["skill", "create"], ["skill", "remove"]):
+                ["skill", "create"], ["skill", "remove"], ["reconcile"],
+                ["integration", "status"], ["integration", "enable"], ["integration", "disable"],
+                ["host", "show"], ["host", "check-client"], ["host", "releases"], ["history"]):
         with pytest.raises(SystemExit):
             main([*cmd, "--help"])
         helps.append(capsys.readouterr().out)

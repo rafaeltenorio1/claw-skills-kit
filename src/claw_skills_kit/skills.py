@@ -11,6 +11,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from claw_skills_kit.layer1 import find_client_specifics
 from claw_skills_kit.questions import add_question
 from claw_skills_kit.reconciler.host import Host
 from claw_skills_kit.reconciler.layout import ANSWERS_FILE, SKILL_FILE
@@ -27,9 +28,10 @@ _ORIGIN_LINE = re.compile(rf"^\s+{ORIGIN_KEY}:\s*{INSTANCE_ORIGIN}\s*$")
 class SkillError(Exception):
     """A refusal before anything is written. `status` is a stable machine-readable code."""
 
-    def __init__(self, status: str, message: str) -> None:
+    def __init__(self, status: str, message: str, findings: Sequence[dict] = ()) -> None:
         super().__init__(message)
         self.status = status
+        self.findings = tuple(findings)
 
 
 @dataclass(frozen=True)
@@ -106,6 +108,14 @@ def plan_create(
     if skills.files(name):
         raise SkillError("skill_exists", f"A skill called {name!r} already exists on this instance.")
     skill_md = render_skill_md(name, description, instructions)
+    leaks = find_client_specifics(skill_md, SKILL_FILE)
+    if leaks:
+        raise SkillError(
+            "client_data_in_skill",
+            "The skill text holds client specifics (contact, channel, ID or secret). Keep the skill generic and "
+            "put them in its settings: one --question each.",
+            [f.to_dict() for f in leaks],
+        )
     config = new_client_config(name)
     for q in questions:
         config = add_question(config, q.key, q.suggested, q.answer).text

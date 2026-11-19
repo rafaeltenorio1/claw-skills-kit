@@ -1,3 +1,8 @@
 #!/usr/bin/env sh
-# Runs the claw-skills-kit CLI from its project folder. Set CSK_DIR if the project lives elsewhere.
+# Runs the claw-skills-kit CLI.
+# - CSK_PYTHON set (the Docker image): use that interpreter, the kit is installed there.
+# - otherwise: run from the project folder with uv. Set CSK_DIR if the project lives elsewhere.
+if [ -n "${CSK_PYTHON:-}" ]; then
+    exec "$CSK_PYTHON" -m claw_skills_kit "$@"
+fi
 exec uv run --quiet --project "${CSK_DIR:-$HOME/projects/claw-skills-kit}" python -m claw_skills_kit "$@"

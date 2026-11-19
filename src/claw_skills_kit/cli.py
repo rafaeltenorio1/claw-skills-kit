@@ -4,6 +4,7 @@ import sys
 import traceback
 from pathlib import Path
 
+from claw_skills_kit.evidence import evidence_path, history, record_approval, record_result
 from claw_skills_kit.skills import NewQuestion, SkillError, apply_plan, plan_create, plan_remove
 from claw_skills_kit.questions import QuestionError, add_question, change_question, remove_question
 from claw_skills_kit.interview import InterviewError, apply_answers, load_answers, missing_required
@@ -29,6 +30,22 @@ EXIT_SKILL = 11
 EXIT_EXISTING_CONFIG = 12
 EXIT_QUESTION = 13
 EXIT_ANSWER_WOULD_BE_LOST = 14
+EXIT_INTEGRATION = 15
+
+# IntegrationError.status -> exit code.
+_INTEGRATION_CODES = {
+    "invalid_skill": EXIT_SKILL,
+    "skill_not_found": EXIT_SKILL,
+    "not_required": EXIT_INTEGRATION,
+    "secret_value_refused": EXIT_INTEGRATION,
+    "looks_like_secret": EXIT_INTEGRATION,
+    "no_primary_env": EXIT_INTEGRATION,
+    "invalid_integration": EXIT_INTEGRATION,
+    "config_unreadable": EXIT_INVALID_INPUT,
+    "rolled_back": EXIT_ROLLED_BACK,
+    "rollback_failed": EXIT_ROLLBACK_FAILED,
+    "openclaw_failed": EXIT_UNEXPECTED,
+}
 
 # QuestionError.status -> exit code.
 _QUESTION_CODES = {
@@ -46,6 +63,7 @@ _SKILL_CODES = {
     "skill_exists": EXIT_SKILL,
     "skill_not_found": EXIT_SKILL,
     "golden_skill": EXIT_SKILL,
+    "client_data_in_skill": EXIT_SKILL,
     "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
     "rolled_back": EXIT_ROLLED_BACK,
     "rollback_failed": EXIT_ROLLBACK_FAILED,
@@ -119,8 +137,13 @@ def _build_parser() -> argparse.ArgumentParser:
     rec_parser.add_argument("--target", type=Path, required=True, help="The host's skills folder.")
     rec_parser.add_argument("--pins", type=Path, required=True, help="Pins file (skills.lock.json).")
     rec_parser.add_argument(
+        "--backup-dir", type=Path,
+        help="With --apply: first copy every file that will be replaced or deleted to BACKUP_DIR/<UTC time>/.",
+    )
+    rec_parser.add_argument(
         "--apply", action="store_true", help="Write the changes. Without it nothing is touched."
     )
+    _add_approval(rec_parser)
 
     q_parser = subparsers.add_parser(
         "question",
@@ -143,6 +166,7 @@ def _build_parser() -> argparse.ArgumentParser:
                 "--discard-answer", action="store_true", help="Allow removing a question that has an answer."
             )
         a.add_argument("--apply", action="store_true", help="Write the change. Without it nothing is touched.")
+        _add_approval(a)
 
     s_parser = subparsers.add_parser(
         "skill", help="Create or remove a skill on one client's instance (dry run unless --apply)."
@@ -162,6 +186,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="A settings question written with the skill: KEY SUGGESTED [ANSWER]. Repeat for each question.",
     )
     create.add_argument("--apply", action="store_true", help="Write the skill. Without it nothing is touched.")
+    _add_approval(create)
     remove = s_sub.add_parser("remove", help="Remove a skill that was created on this instance.")
     remove.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
     remove.add_argument("--name", required=True)
@@ -169,19 +194,147 @@ def _build_parser() -> argparse.ArgumentParser:
         "--discard-answers", action="store_true", help="Allow removing a skill whose questions have answers."
     )
     remove.add_argument("--apply", action="store_true", help="Delete the skill. Without it nothing is touched.")
+    _add_approval(remove)
+
+    hist = subparsers.add_parser("history", help="Changes recorded on this host, newest first (CSK_EVIDENCE).")
+    hist.add_argument("--limit", type=int, default=20, help="How many changes to show (default 20).")
+    hist.add_argument("--evidence", type=Path, help="Evidence file; defaults to $CSK_EVIDENCE.")
+
+    lint_parser = subparsers.add_parser(
+        "lint",
+        help="Library check: no client specifics in Layer 1, required files present (exit 11 on findings).",
+    )
+    lint_parser.add_argument("skill_dirs", nargs="+", type=Path, help="Skill folders to check.")
+    lint_parser.add_argument(
+        "--golden", action="store_true",
+        help="Golden skills: also require client-config.template.md, interview.md (1-3 questions), lineage.md.",
+    )
+
+    h_parser = subparsers.add_parser("host", help="Read this host's descriptor (read-only).")
+    h_sub = h_parser.add_subparsers(dest="action", required=True)
+    show = h_sub.add_parser("show", help="The host, its one client and its operator skills.")
+    show.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
+    check = h_sub.add_parser(
+        "check-client",
+        help="Could this gateway also serve CLIENT? Same tenant check as reconcile: exit 8 if it is another client.",
+    )
+    check.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
+    check.add_argument("--name", required=True, help="The client the request is for.")
+    rel = h_sub.add_parser(
+        "releases",
+        help="Which library release this host runs now, and the next one to install (read-only).",
+    )
+    rel.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
+    rel.add_argument("--releases", required=True, type=Path, help="Folder with one sub-folder per release.")
+    verify = h_sub.add_parser(
+        "verify-skills",
+        help="Smoke check: OpenClaw finds every operator skill of this host (exit 11 lists the missing ones).",
+    )
+    verify.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
+
+    i_parser = subparsers.add_parser(
+        "integration",
+        help="Enable or disable a skill's integration in this gateway's config (skills.entries.<skill>).",
+    )
+    i_sub = i_parser.add_subparsers(dest="action", required=True)
+    for action, help_text in (
+        ("status", "Show what the skill needs and whether it loads now."),
+        ("enable", "Provide the variables the skill declares (values) and/or its API key (a reference only)."),
+        ("disable", "Remove what enable set; the skill stops loading."),
+    ):
+        p = i_sub.add_parser(action, help=help_text)
+        p.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
+        p.add_argument("--name", required=True)
+        if action == "enable":
+            p.add_argument(
+                "--env", action="append", default=[], metavar="VAR=VALUE",
+                help="A variable the skill declares in requires.env, with a value that is not a secret.",
+            )
+            p.add_argument(
+                "--api-key-env", metavar="VAR",
+                help="The environment variable that holds the skill's API key (stored as a reference, never a value).",
+            )
+        if action != "status":
+            p.add_argument("--apply", action="store_true", help="Change the config. Without it nothing is touched.")
+            _add_approval(p)
     return parser
 
 
+_LAST_PAYLOAD: dict[str, object] | None = None
+
+
 def _emit(payload: dict[str, object]) -> None:
+    global _LAST_PAYLOAD
+    _LAST_PAYLOAD = payload
     print(json.dumps(payload, ensure_ascii=False))
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the command and return the exit code. Never calls sys.exit itself."""
+    """Run the command and return the exit code. Never calls sys.exit itself.
+
+    With CSK_EVIDENCE set, an applying command (--apply) needs --approval: the approval is recorded before the
+    command runs and its outcome after, whatever the outcome (see evidence.py).
+    """
+    global _LAST_PAYLOAD
     parser = _build_parser()
     args = parser.parse_args(argv)
-
+    _LAST_PAYLOAD = None
+    record_id, path = None, None
     try:
+        if getattr(args, "apply", False):
+            record_id, path = _record_approval(args)
+    except _Refusal as refusal:
+        _emit({"ok": False, "status": refusal.status, **refusal.details})
+        return refusal.code
+    code = _dispatch(parser, args)
+    if record_id is not None:
+        record_result(path, record_id, _LAST_PAYLOAD, code)
+    return code
+
+
+def _add_approval(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--approval", metavar="TEXT",
+        help="The question the client said yes to, in plain words (no answer values). "
+             "Required with --apply when CSK_EVIDENCE is set; recorded before the change.",
+    )
+
+
+def _target_of(args: argparse.Namespace) -> str:
+    if args.command == "reconcile":
+        return str(args.library)
+    for name in ("skill_dir", "skills_dir"):
+        if getattr(args, name, None) is not None:
+            value = str(getattr(args, name))
+            return f"{value}/{args.name}" if getattr(args, "name", None) else value
+    return ""
+
+
+def _record_approval(args: argparse.Namespace):
+    from claw_skills_kit.layer1 import find_client_specifics
+
+    path = evidence_path()
+    if path is None:
+        return None, None
+    approval = (args.approval or "").strip()
+    if not approval:
+        raise _Refusal("approval_required", EXIT_INVALID_INPUT,
+                       error="This host records approvals: pass --approval with the question the client said yes to.")
+    if "\n" in approval or len(approval) > 300:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="--approval must be one line of at most 300 characters.")
+    if find_client_specifics(approval):
+        raise _Refusal("approval_has_client_data", EXIT_INVALID_INPUT,
+                       error="Write the approval without contact details, IDs, links or secrets.")
+    try:
+        return record_approval(path, args.command, getattr(args, "action", None), _target_of(args), approval), path
+    except OSError as exc:
+        raise _Refusal("evidence_unwritable", EXIT_INVALID_INPUT, error=f"Cannot record the approval: {exc}") from None
+
+
+def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    try:
+        if args.command == "history":
+            return _run_history(args)
         if args.command == "fill":
             return _run_fill(parser, args.skill_dir, args.answers, args.out)
         if args.command == "lock":
@@ -191,7 +344,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "question":
             return _run_question(args)
         if args.command == "reconcile":
-            return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply)
+            return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply, args.backup_dir)
+        if args.command == "integration":
+            return _run_integration(args)
+        if args.command == "host":
+            return _run_host(args)
+        if args.command == "lint":
+            return _run_lint(args.skill_dirs, args.golden)
         parser.error(f"Unknown command: {args.command}")
     except _Refusal as refusal:
         _emit({"ok": False, "status": refusal.status, **refusal.details})
@@ -302,7 +461,9 @@ def _run_lock(library: Path, skills: list[str], out_path: Path) -> int:
     return EXIT_OK
 
 
-def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path, apply: bool) -> int:
+def _run_reconcile(
+    host_path: Path, library: Path, target: Path, pins_path: Path, apply: bool, backup_dir: Path | None = None
+) -> int:
     descriptor_text = _read_utf8(host_path, "invalid_descriptor", EXIT_INVALID_INPUT, "host descriptor")
     try:
         descriptor = load_descriptor(descriptor_text)
@@ -324,7 +485,12 @@ def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path
             for argv in descriptor.smoke.commands
         ]
 
+    backup: dict[str, object] = {}
     try:
+        if apply and backup_dir is not None:
+            backup = _backup_before_apply(
+                reconcile(descriptor, LocalHost(library), LocalHost(target), pins, apply=False), target, backup_dir
+            )
         report = reconcile(
             descriptor, LocalHost(library), LocalHost(target), pins, apply=apply, extra_checks=smoke_commands
         )
@@ -332,7 +498,7 @@ def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path
         raise _refuse(exc) from None
 
     code = {"rolled_back": EXIT_ROLLED_BACK, "rollback_failed": EXIT_ROLLBACK_FAILED}.get(report.status, EXIT_OK)
-    _emit({"ok": code == EXIT_OK, **report.to_dict()})
+    _emit({"ok": code == EXIT_OK, **report.to_dict(), **backup})
     return code
 
 
@@ -395,7 +561,10 @@ def _run_skill(args: argparse.Namespace) -> int:
         if args.apply:
             apply_plan(skills, plan)
     except SkillError as exc:
-        raise _Refusal(exc.status, _SKILL_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+        details: dict[str, object] = {"error": str(exc)}
+        if exc.findings:
+            details["findings"] = list(exc.findings)  # kind and line only, never the text found
+        raise _Refusal(exc.status, _SKILL_CODES.get(exc.status, EXIT_UNEXPECTED), **details) from None
     except QuestionError as exc:
         raise _Refusal(exc.status, _QUESTION_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
 
@@ -406,3 +575,210 @@ def _run_skill(args: argparse.Namespace) -> int:
         "discarded_answers": plan.had_answers and args.apply,
     })
     return EXIT_OK
+
+
+def _parse_env_pairs(pairs: list[str]) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for pair in pairs:
+        name, sep, value = pair.partition("=")
+        if not sep or not name:
+            raise _Refusal("invalid_integration", EXIT_INTEGRATION, error="--env takes VAR=VALUE.")
+        if name in env:
+            raise _Refusal("invalid_integration", EXIT_INTEGRATION, error=f"{name} given twice.")
+        env[name] = value
+    return env
+
+
+def _run_integration(args: argparse.Namespace) -> int:
+    from claw_skills_kit import integrations as ig  # local: the other commands never need it
+
+    _require_dir(args.skills_dir, "skills folder")
+    skill_md_path = args.skills_dir / args.name / "SKILL.md"
+    if "/" in args.name or "\\" in args.name or args.name.startswith(".") or not skill_md_path.is_file():
+        raise _Refusal("skill_not_found", EXIT_SKILL, error=f"There is no skill called {args.name!r} here.")
+    try:
+        requirements = ig.read_requirements(skill_md_path.read_text(encoding="utf-8"))
+        openclaw = ig.OpenClaw()
+        config_file = openclaw.config_file()
+        entry = ig.read_entry(config_file, args.name)
+        if args.action == "status":
+            status = ig.status_of(args.name, requirements, entry, openclaw.skill_ready(args.name))
+            _emit({
+                "ok": True, "status": "ready" if status.ready else "not_ready", "skill": args.name,
+                "required_env": list(status.required_env), "primary_env": status.primary_env,
+                "configured_env": list(status.configured_env), "api_key_ref": status.api_key_ref,
+                "missing_env": list(status.missing_env),
+            })
+            return EXIT_OK
+        if args.action == "enable":
+            plan = ig.plan_enable(
+                args.name, requirements, entry, _parse_env_pairs(args.env), args.api_key_env
+            )
+        else:
+            plan = ig.plan_disable(args.name, requirements, entry)
+        ready = None
+        if args.apply:
+            ready = ig.apply_plan(openclaw, config_file, plan)
+    except ig.IntegrationError as exc:
+        details: dict[str, object] = {"error": str(exc)}
+        if exc.unrestored:
+            details["unrestored"] = list(exc.unrestored)
+        raise _Refusal(exc.status, _INTEGRATION_CODES.get(exc.status, EXIT_UNEXPECTED), **details) from None
+
+    if not plan.changed:
+        status = "unchanged"
+    else:
+        status = "applied" if args.apply else "planned"
+    # variable names only, never values
+    _emit({
+        "ok": True, "status": status, "action": plan.action, "skill": plan.skill,
+        "env": list(plan.env_names), "api_key_ref": plan.api_key_ref, "ready": ready,
+    })
+    return EXIT_OK
+
+
+def _run_host(args: argparse.Namespace) -> int:
+    """Read-only. check-client runs the reconciler's own tenant check on (this host's client + the new one)."""
+    import dataclasses
+
+    from claw_skills_kit.reconciler.descriptor import TenantConflictError, check_single_tenant
+
+    text = _read_utf8(args.host, "invalid_descriptor", EXIT_INVALID_INPUT, "host descriptor")
+    try:
+        descriptor = load_descriptor(text)
+        check_single_tenant(descriptor)
+    except TenantConflictError as exc:
+        raise _Refusal("tenant_conflict", EXIT_TENANT_CONFLICT, error=str(exc)) from None
+    except DescriptorError as exc:
+        raise _Refusal("invalid_descriptor", EXIT_INVALID_INPUT, error=str(exc)) from None
+
+    base = {"host_id": descriptor.host_id, "client": descriptor.clients[0]}
+    if args.action == "verify-skills":
+        return _verify_skills(descriptor, base)
+    if args.action == "releases":
+        return _releases(descriptor, base, args.releases)
+    if args.action == "show":
+        _emit({"ok": True, "status": "ok", **base, "skills": list(descriptor.skills)})
+        return EXIT_OK
+
+    name = args.name.strip()
+    if not name:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="--name must not be empty.")
+    if name.casefold() in {c.casefold() for c in descriptor.clients}:
+        _emit({"ok": True, "status": "same_client", **base})
+        return EXIT_OK
+    try:
+        check_single_tenant(dataclasses.replace(descriptor, clients=(*descriptor.clients, name)))
+    except TenantConflictError:
+        raise _Refusal(
+            "tenant_conflict", EXIT_TENANT_CONFLICT, **base,
+            error="This gateway already serves one client; another client needs its own gateway.",
+        ) from None
+    raise AssertionError("the tenant check accepted a second client")  # a bug: reported as unexpected_error
+
+
+def _verify_skills(descriptor, base: dict[str, object]) -> int:
+    """Every skill the descriptor manages must be in OpenClaw's inventory (`skills check --json`).
+
+    Present in any state counts: ready, disabled, or waiting for an integration. A skill OpenClaw could not read
+    (for example a broken SKILL.md frontmatter) is absent from the inventory, while `skills list` and
+    `config validate` still exit 0 (observed on 2026.11.3), so this is the check that catches it.
+    """
+    from claw_skills_kit import integrations as ig
+
+    try:
+        openclaw = ig.OpenClaw()
+        openclaw.rescan_skills(openclaw.config_file())  # otherwise the inventory can be a minute old
+        inventory = openclaw.skill_inventory()
+    except ig.IntegrationError as exc:
+        raise _Refusal("openclaw_failed", EXIT_UNEXPECTED, error=str(exc)) from None
+    missing = sorted(s for s in descriptor.skills if s not in inventory)
+    if missing:
+        raise _Refusal(
+            "skills_not_loaded", EXIT_SKILL, **base, missing=missing,
+            error="OpenClaw does not find these skills; their files may be broken.",
+        )
+    _emit({"ok": True, "status": "ok", **base, "skills": list(descriptor.skills)})
+    return EXIT_OK
+
+
+def _releases(descriptor, base: dict[str, object], releases: Path) -> int:
+    """current = the release whose pins equal the installed skills' revisions; next = the release after it.
+
+    Revisions ignore client-config.md, so the client's answers and instance-only questions never make a host look
+    out of date. A host that matches no release has drifted: `current` is null and nothing should be applied.
+    """
+    _require_dir(releases, "releases folder")
+    _require_dir(Path(descriptor.skills_dir), "skills folder")
+    names = sorted(p.name for p in releases.iterdir() if (p / "skills.lock.json").is_file())
+    target = LocalHost(Path(descriptor.skills_dir))
+    installed: dict[str, str | None] = {}
+    for skill in descriptor.skills:
+        try:
+            installed[skill] = compute_revisions(target, [skill])[skill]
+        except ReconcileError:
+            installed[skill] = None  # missing on the host
+    current, closest, best = None, None, -1
+    for name in names:
+        try:
+            pins = load_pins((releases / name / "skills.lock.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, LockfileError) as exc:
+            raise _Refusal("invalid_pins", EXIT_INVALID_INPUT, error=f"{name}: {exc}") from None
+        matching = [s for s in descriptor.skills if installed[s] is not None and pins.get(s) == installed[s]]
+        if len(matching) == len(descriptor.skills):
+            current = name
+        if len(matching) >= best:  # ties go to the newer release
+            closest, best = name, len(matching)
+            drifted = [s for s in descriptor.skills if s not in matching]
+    later = names[names.index(current) + 1:] if current else []
+    payload: dict[str, object] = {
+        "ok": True, "status": "ok" if current else "drift", **base, "current": current,
+        "next": later[0] if later else None, "newer": later, "releases": names,
+    }
+    if current is None and closest is not None:
+        # drift: the release nearest to the host, and the skills that differ from it (changed by hand or missing)
+        payload.update(closest=closest, drifted=drifted)
+    _emit(payload)
+    return EXIT_OK
+
+
+def _run_lint(folders: list[Path], golden: bool) -> int:
+    from claw_skills_kit.layer1 import lint_skill
+
+    results: dict[str, list[dict[str, object]]] = {}
+    for folder in folders:
+        _require_dir(folder, "skill folder")
+        results[folder.name] = [f.to_dict() for f in lint_skill(folder, golden=golden)]
+    failed = {name: found for name, found in results.items() if found}
+    # kinds and lines only, never the text found
+    _emit({"ok": not failed, "status": "lint_failed" if failed else "ok", "skills": results})
+    return EXIT_SKILL if failed else EXIT_OK
+
+
+def _run_history(args: argparse.Namespace) -> int:
+    path = args.evidence or evidence_path()
+    if path is None:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="No evidence file: set CSK_EVIDENCE or pass --evidence.")
+    if args.limit < 1:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="--limit must be at least 1.")
+    entries = history(path, args.limit)
+    _emit({"ok": True, "status": "ok", "count": len(entries), "changes": entries})
+    return EXIT_OK
+
+
+def _backup_before_apply(plan, target: Path, backup_dir: Path) -> dict[str, object]:
+    """Copy the files a reconcile will replace or delete, so hand edits on a drifted host are never lost."""
+    import shutil
+    from datetime import datetime, timezone
+
+    paths = [c.path for c in plan.changes if c.action in ("update", "delete") and (target / c.path).is_file()]
+    if not paths:
+        return {}
+    folder = backup_dir / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    try:
+        for rel in paths:
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target / rel, folder / rel)
+    except OSError as exc:
+        raise _Refusal("backup_failed", EXIT_INVALID_INPUT, error=f"Nothing was changed; backup failed: {exc}") from None
+    return {"backup": str(folder), "backed_up": sorted(paths)}
