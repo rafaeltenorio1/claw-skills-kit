@@ -61,6 +61,44 @@ mkdir -p "$WORKSPACE/skills"
 rm -rf "$WORKSPACE/skills/skill-manager"
 cp -r "$KIT/skill-manager" "$WORKSPACE/skills/skill-manager"
 
+# 3a. Real integrations, only when their variables are in the env file. Values never go into a config file.
+#     Telegram: OpenClaw reads TELEGRAM_BOT_TOKEN from the environment (default account). DMs need pairing, so only
+#     people the operator approves can talk to the bot; in groups the bot answers only when mentioned.
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+    step "telegram: enabling the channel (token read from the environment)"
+    openclaw config set --batch-json '[
+      {"path": "channels.telegram.enabled", "value": true},
+      {"path": "channels.telegram.dmPolicy", "value": "pairing"},
+      {"path": "channels.telegram.groups", "value": {"*": {"requireMention": true}}}
+    ]'
+fi
+#     Mail: one Himalaya account (IMAP to read, SMTP to send). The password is read at use time with printenv, so
+#     the file holds no secret. Hosts default to Gmail; CSK_MAIL_IMAP_HOST / CSK_MAIL_SMTP_HOST override them.
+if [ -n "${CSK_MAIL_ADDRESS:-}" ] && [ -n "${IMAP_PASSWORD:-}" ]; then
+    step "mail: writing the Himalaya account (password read from the environment)"
+    mkdir -p "$(dirname "$HIMALAYA_CONFIG")"
+    {
+        echo '[accounts.default]'
+        echo "email = \"$CSK_MAIL_ADDRESS\""
+        echo 'default = true'
+        echo 'backend.type = "imap"'
+        echo "backend.host = \"${CSK_MAIL_IMAP_HOST:-imap.gmail.com}\""
+        echo 'backend.port = 993'
+        echo 'backend.encryption.type = "tls"'
+        echo "backend.login = \"$CSK_MAIL_ADDRESS\""
+        echo 'backend.auth.type = "password"'
+        echo 'backend.auth.cmd = "printenv IMAP_PASSWORD"'
+        echo 'message.send.backend.type = "smtp"'
+        echo "message.send.backend.host = \"${CSK_MAIL_SMTP_HOST:-smtp.gmail.com}\""
+        echo 'message.send.backend.port = 587'
+        echo 'message.send.backend.encryption.type = "start-tls"'
+        echo "message.send.backend.login = \"$CSK_MAIL_ADDRESS\""
+        echo 'message.send.backend.auth.type = "password"'
+        echo 'message.send.backend.auth.cmd = "printenv IMAP_PASSWORD"'
+    } > "$HIMALAYA_CONFIG.tmp"
+    chmod 600 "$HIMALAYA_CONFIG.tmp" && mv "$HIMALAYA_CONFIG.tmp" "$HIMALAYA_CONFIG"
+fi
+
 # 3b. The host descriptor (operator-owned; the agent never edits it). Its smoke checks are rewritten on every run,
 #     so an existing host gets new checks too. First run only: write it with one client and install the OLDEST
 #     release with the reconciler. Later runs keep its client and skills, so an update made in chat is never undone.
