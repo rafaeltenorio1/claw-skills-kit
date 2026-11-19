@@ -23,7 +23,8 @@ Every `--apply` also takes `--approval "<the question the client said yes to>"`:
 without the client's answer values, contact details, IDs or secrets (for a settings answer: "Save your answer to:
 <the question>"). This host records it before the change; without it the tool refuses (`approval_required`).
 
-Run every `lk` call in the foreground and wait for its JSON: call exec with `yieldMs: 120000`. Some calls (an update,
+Run every `lk` call in the foreground and wait for its JSON. In your code tool the call is
+`exec({command: "<the lk command>", yieldMs: 120000})` (the function is `exec`, not `tools.exec`). Some calls (an update,
 connecting an integration) run checks for more than 10 seconds, and exec's default would move them to the
 background; what you tell the client must come from the finished result, in the same turn.
 
