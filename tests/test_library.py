@@ -18,6 +18,8 @@ from claw_skills_kit.template_format import fill_answers, parse_template
 
 RELEASES = Path(__file__).parent.parent / "library/releases"
 ALL = sorted(p.name for p in RELEASES.iterdir() if p.is_dir())
+BROKEN = sorted(r for r in ALL if (RELEASES / r / "BROKEN_ON_PURPOSE.md").exists())  # rollback demo
+GOOD = [r for r in ALL if r not in BROKEN]
 OLD, NEW = "2026.11.10", "2026.11.18"
 
 
@@ -47,7 +49,7 @@ def test_pins_match_the_skills_in_the_release(release):
     assert compute_revisions(LocalHost(RELEASES / release / "skills"), sorted(pins)) == dict(pins)
 
 
-@pytest.mark.parametrize("release", ALL)
+@pytest.mark.parametrize("release", GOOD)
 def test_each_skill_follows_the_template(release):
     for name in skills_of(release):
         folder = RELEASES / release / "skills" / name
@@ -110,3 +112,15 @@ def test_the_library_is_not_modified_by_the_test(tmp_path):
     shutil.copytree(RELEASES, copy)
     for release in ALL:
         assert compute_revisions(LocalHost(copy / release / "skills"), skills_of(release)) == dict(pins(release))
+
+
+def test_the_rollback_demo_release_is_still_broken_on_purpose():
+    # if someone "fixes" it, the rollback demo silently stops failing
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fake", Path(__file__).parent / "fake_openclaw.py")
+    fake = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fake)
+    assert BROKEN == ["2026.11.25"]
+    text = (RELEASES / "2026.11.25/skills/meeting-notes/SKILL.md").read_text(encoding="utf-8")
+    assert "\ndesciption: " in text and "\ndescription: " not in frontmatter(text)
+    assert not fake.readable(text, "meeting-notes")

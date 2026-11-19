@@ -32,6 +32,7 @@ background; what you tell the client must come from the finished result, in the 
 | Remove skill | `lk skill remove $SKILLS --name <name> [--discard-answers]` |
 | This assistant's client | `lk host show --host "$CSK_HOST"` |
 | Another person or business? | `lk host check-client --host "$CSK_HOST" --name "<who the request is for>"` |
+| Release now / next | `lk host releases --host "$CSK_HOST" --releases "$CSK_RELEASES"` |
 | Integration status | `lk integration status $SKILLS --name <skill>` |
 | Connect an integration | `lk integration enable $SKILLS --name <skill> [--env VAR="<value>"] [--api-key-env VAR]` |
 | Disconnect it | `lk integration disable $SKILLS --name <skill>` |
@@ -80,10 +81,13 @@ own questions, runs a quick check of the assistant, and puts every file back if 
 
 When the client asks if there are updates, or asks to update:
 
-1. **Dry run against the newest release.**
-   `REL="$CSK_RELEASES/$(ls "$CSK_RELEASES" | sort | tail -n 1)"`, then
+1. **Find the next release.** `lk host releases --host "$CSK_HOST" --releases "$CSK_RELEASES"`. Updates go one
+   release at a time, from the one this assistant runs (`current`) to the one after it (`next`).
+   - `next` is null: say in one sentence that everything is up to date. Stop.
+   - `status: drift` (`current` is null): this assistant's operator skills match no operator release; someone changed
+     them by hand. Say so in plain words, apply nothing, and say that operator needs to look at it. Stop.
+2. **Dry run that release.** `REL="$CSK_RELEASES/<next>"`, then
    `lk reconcile --host "$CSK_HOST" --library "$REL/skills" --target $SKILLS --pins "$REL/skills.lock.json"`.
-2. **`unchanged`**: say in one sentence that everything is up to date. Stop.
 3. **`planned`**: read `$REL/RELEASE.md` and, for each skill in `changes`, its `lineage.md` in `$REL/skills/`.
    Tell the client, in plain words:
    - which skills change and what gets better (from the notes, not from file names);
@@ -94,6 +98,7 @@ When the client asks if there are updates, or asks to update:
    Then ask yes or no, and say that a quick check runs and that nothing changes if it fails.
 4. **Only after a clear yes**, run the same command with `--apply`, and read `status`:
    - `applied`: say it is done. If the update brought new questions, ask them now (Unanswered questions above).
+     If `newer` listed more releases, say one more update is available.
    - `rolled_back` (exit 6): the check failed and every file was put back. Say the update did not go in, nothing
      changed, and that operator needs to look at that release. Do not try again.
    - `rollback_failed` (exit 7): say a person at operator must check this assistant now. Do not try again.
