@@ -50,6 +50,11 @@ if ls -d "$HOME"/.cache/ms-playwright/chromium-* > /dev/null 2>&1; then
     openclaw config set browser.noSandbox true
 fi
 
+# 2c. OpenClaw's own repair, before anything is installed: a fresh state has pending migrations (for example the
+#     heartbeat monitor) that `doctor --lint` reports, and the smoke checks require doctor to pass. Safe to repeat.
+step "applying openclaw doctor --fix"
+openclaw doctor --fix --non-interactive > /dev/null
+
 # 3. The skill-manager skill, replaced by the copy baked into the image.
 step "installing skill-manager"
 mkdir -p "$WORKSPACE/skills"
@@ -81,11 +86,16 @@ if first:
 else:
     with open(out, encoding="utf-8") as f:
         descriptor = json.load(f)
-descriptor["smoke"] = {"timeout_seconds": 120, "commands": [
+kit = [os.environ["CSK_PYTHON"], "-m", "claw_skills_kit"]
+descriptor["smoke"] = {"timeout_seconds": 180, "commands": [
     ["openclaw", "config", "validate"],
     ["openclaw", "skills", "list"],
-    [os.environ["CSK_PYTHON"], "-m", "claw_skills_kit", "host", "verify-skills", "--host", out],
+    [*kit, "host", "verify-skills", "--host", out],
+    [*kit, "host", "doctor", "--host", out],
 ]}
+# Reviewed by the operator: in a container the gateway must bind `lan` for Docker's port publishing (the port is
+# published on host loopback only), which doctor reports as a warning. Any other finding fails the smoke check.
+descriptor["doctor_allow"] = ["gateway.bind_network_accessible"]
 with open(out + ".tmp", "w", encoding="utf-8") as f:
     json.dump(descriptor, f, indent=2)
     f.write("\n")

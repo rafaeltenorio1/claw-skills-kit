@@ -205,3 +205,47 @@ def test_no_backup_folder_when_nothing_changes(capsys, installed, tmp_path):
     out = json.loads(capsys.readouterr().out)
     assert out["status"] == "unchanged" and "backup" not in out
     assert not (tmp_path / "backups").exists()
+
+
+# --- doctor: openclaw doctor --lint, with a reviewed list of known findings ----------------------------
+
+BIND = {"checkId": "core/doctor/security", "severity": "warning", "requirement": "gateway.bind_network_accessible",
+        "message": "Gateway bound to lan"}
+
+
+def with_doctor(state, host, findings, allow=None):
+    (state / "doctor_findings.json").write_text(json.dumps(findings))
+    data = json.loads(host.read_text())
+    if allow is not None:
+        data["doctor_allow"] = allow
+    host.write_text(json.dumps(data))
+
+
+def test_doctor_passes_with_no_findings(capsys, gateway):
+    state, host = gateway
+    with_doctor(state, host, [])
+    code, out = run(capsys, "doctor", "--host", str(host))
+    assert (code, out["status"], out["findings"]) == (0, "ok", [])
+
+
+def test_doctor_passes_when_every_finding_is_allowed(capsys, gateway):
+    state, host = gateway
+    with_doctor(state, host, [BIND], allow=["gateway.bind_network_accessible"])
+    code, out = run(capsys, "doctor", "--host", str(host))
+    assert (code, out["status"], out["findings"][0]["allowed"]) == (0, "ok", True)
+
+
+@pytest.mark.parametrize("allow", [None, [], ["something.else"]])
+def test_doctor_fails_on_a_finding_not_allowed(capsys, gateway, allow):
+    state, host = gateway
+    with_doctor(state, host, [BIND], allow=allow)
+    code, out = run(capsys, "doctor", "--host", str(host))
+    assert (code, out["status"]) == (16, "doctor_findings")
+    assert "message" not in out["findings"][0]
+
+
+def test_doctor_allow_must_be_a_list_of_ids(capsys, gateway):
+    state, host = gateway
+    with_doctor(state, host, [], allow="gateway.bind_network_accessible")
+    code, out = run(capsys, "doctor", "--host", str(host))
+    assert (code, out["status"]) == (10, "invalid_descriptor")

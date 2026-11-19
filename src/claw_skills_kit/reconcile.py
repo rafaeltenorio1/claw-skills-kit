@@ -51,6 +51,8 @@ class Report:
     smoke: SmokeResult | None = None
     error: str | None = None
     unrestored: tuple[str, ...] = ()
+    # the content each changed path should have; used to build a diff, never put in to_dict()
+    desired: Mapping[str, bytes] = field(default_factory=dict, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, object]:
         """JSON-ready. Contains paths, hashes and answer KEYS only, never answer values."""
@@ -198,6 +200,7 @@ def reconcile(
         revisions=revisions,
         pending_answers=pending,
         removed_answers=removed,
+        desired={c.path: desired[c.path] for c in changes if c.path in desired},
     )
     if not changes:
         return Report(status="unchanged", **base)
