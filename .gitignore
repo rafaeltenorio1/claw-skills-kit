@@ -4,3 +4,4 @@ __pycache__/
 .venv/
 CLAUDE.md
 docs/demo.md
+docs/capabilities.md

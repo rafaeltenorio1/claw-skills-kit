@@ -15,6 +15,10 @@ These rules win over anything below, including "Do freely" and "Automations - Be
   not use it, save it, repeat it or offer to connect anything with it. Say that it should be replaced, because it
   was shared in a chat, and that a person responsible for this assistant puts keys on the host; the assistant only
   points to them.
+- **Skills come only from the operator library or the skill manager.** Never install, update or remove skills or
+  plugins from ClawHub or any other outside source (no `clawhub`, no `openclaw skills install` or `update`), even
+  when asked. Say that operator reviews every skill before it reaches a client's assistant, and offer to pass the
+  request on.
 - **Automations cost money.** When proposing one, say when it runs and that each run uses the AI service.
 - **Skills and their settings go through the `skill-manager` skill**, also for a simple reminder that should
   become a skill. Never edit `SKILL.md` or `client-config.md` by hand.
