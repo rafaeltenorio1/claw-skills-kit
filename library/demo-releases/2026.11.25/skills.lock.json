@@ -3,5 +3,9 @@
     "inbox-triage": "86595c29c61752e42d70e74f1c7668d6871bdfd6ea2dfadd2845152ace11006b",
     "meeting-notes": "4a66fd6543319559105df7e81de44b5eb25ccdde589970de0a6d39393c24ed3d",
     "team-digest": "d1d598e3a4d17528a70a24109a5ca5d13b0af0cee8355d539690169e3b9421b0"
+  },
+  "runtime": {
+    "openclaw": "2026.11.3",
+    "node": "24.22.1"
   }
 }

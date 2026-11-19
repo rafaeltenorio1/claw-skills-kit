@@ -159,10 +159,10 @@ Connecting it changes only this gateway's settings, never the skill.
 `lk host releases` says `drift` when this assistant's operator skills match no release: someone edited them by hand.
 `closest` is the release nearest to what is installed and `drifted` lists the skills that differ from it.
 
-1. Dry run against the closest release: `REL="$CSK_RELEASES/<closest>"`, then the same `lk reconcile` as an
-   update. Its `changes` are the files that would be replaced.
-2. Read the hand-made version of each drifted skill's `SKILL.md` and compare it with `$REL/skills/<skill>/SKILL.md`
-   to understand the change (for example an extra rule). Tell the client in plain words: which skills were changed
+1. Dry run against the closest release with `--diff`: `REL="$CSK_RELEASES/<closest>"`, then the same
+   `lk reconcile` as an update plus `--diff`. `diff` shows exactly what the hand edit was (lines starting with `-`
+   are what bringing the skill back would remove).
+2. Understand the change from the diff (for example an extra rule). Tell the client in plain words: which skills were changed
    by hand and what the change does, that bringing them back to the operator's version keeps all their answers and their
    own questions, that a copy of the hand-made version is kept, and that a quick check runs and everything is put
    back if it fails. Ask yes or no.

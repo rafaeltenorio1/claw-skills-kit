@@ -40,6 +40,9 @@ def readable(text, name):
 
 def main(argv):
     state, args = Path(argv[0]), argv[1:]
+    if args == ["--version"]:
+        print(f"OpenClaw {os.environ.get('FAKE_OPENCLAW_VERSION', '2026.11.3')} (fake)")
+        return 0
     data = load(state)
     if args[:2] == ["config", "file"]:
         print(state / "openclaw.json")
@@ -61,6 +64,12 @@ def main(argv):
         node.pop(last, None)
         save(state, data)
         return 0
+    if args[:3] == ["doctor", "--lint", "--json"]:
+        findings_file = state / "doctor_findings.json"
+        findings = json.loads(findings_file.read_text()) if findings_file.exists() else []
+        print("banner line that is not json")
+        print(json.dumps({"schemaVersion": 1, "ok": not findings, "findings": findings}))
+        return 1 if findings else 0
     if args[:2] == ["config", "validate"]:
         return 1 if (state / "invalid").exists() else 0
     if args[:3] == ["skills", "check", "--json"]:

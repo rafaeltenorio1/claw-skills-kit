@@ -9,10 +9,11 @@ from claw_skills_kit.skills import NewQuestion, SkillError, apply_plan, plan_cre
 from claw_skills_kit.questions import QuestionError, add_question, change_question, remove_question
 from claw_skills_kit.interview import InterviewError, apply_answers, load_answers, missing_required
 from claw_skills_kit.reconcile import ReconcileError, compute_revisions, reconcile
+from claw_skills_kit.review import review_diff
 from claw_skills_kit.reconciler.descriptor import DescriptorError, load_descriptor
 from claw_skills_kit.reconciler.host import LocalHost
 from claw_skills_kit.reconciler.layout import ANSWERS_FILE
-from claw_skills_kit.reconciler.lockfile import LockfileError, dump_pins, load_pins
+from claw_skills_kit.reconciler.lockfile import LockfileError, dump_pins, load_pins, load_runtime_pins
 from claw_skills_kit.reconciler.smoke import CommandCheck
 from claw_skills_kit.template_format import FillError, TemplateFormatError, fill_answers, parse_template
 
@@ -31,6 +32,7 @@ EXIT_EXISTING_CONFIG = 12
 EXIT_QUESTION = 13
 EXIT_ANSWER_WOULD_BE_LOST = 14
 EXIT_INTEGRATION = 15
+EXIT_HOST_CHECK = 16
 
 # IntegrationError.status -> exit code.
 _INTEGRATION_CODES = {
@@ -127,6 +129,8 @@ def _build_parser() -> argparse.ArgumentParser:
     lock_parser.add_argument("library", type=Path, help="Folder holding the skills.")
     lock_parser.add_argument("--skills", nargs="+", required=True, help="Skill names to pin.")
     lock_parser.add_argument("--out", type=Path, required=True, help="Where to write the pins file.")
+    lock_parser.add_argument("--openclaw", metavar="VERSION", help="Pin the OpenClaw version hosts must run.")
+    lock_parser.add_argument("--node", metavar="VERSION", help="Pin the Node version hosts must run.")
 
     rec_parser = subparsers.add_parser(
         "reconcile",
@@ -136,6 +140,10 @@ def _build_parser() -> argparse.ArgumentParser:
     rec_parser.add_argument("--library", type=Path, required=True, help="Folder holding the skills.")
     rec_parser.add_argument("--target", type=Path, required=True, help="The host's skills folder.")
     rec_parser.add_argument("--pins", type=Path, required=True, help="Pins file (skills.lock.json).")
+    rec_parser.add_argument(
+        "--diff", action="store_true",
+        help="Add a text diff of the planned change. client-config.md is summarised by keys, never by values.",
+    )
     rec_parser.add_argument(
         "--backup-dir", type=Path,
         help="With --apply: first copy every file that will be replaced or deleted to BACKUP_DIR/<UTC time>/.",
@@ -226,6 +234,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     rel.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
     rel.add_argument("--releases", required=True, type=Path, help="Folder with one sub-folder per release.")
+    doctor = h_sub.add_parser(
+        "doctor",
+        help="Smoke check: openclaw doctor --lint passes, except findings listed in the descriptor's doctor_allow "
+             "(exit 16 names the others).",
+    )
+    doctor.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
     verify = h_sub.add_parser(
         "verify-skills",
         help="Smoke check: OpenClaw finds every operator skill of this host (exit 11 lists the missing ones).",
@@ -343,13 +357,15 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if args.command == "fill":
             return _run_fill(parser, args.skill_dir, args.answers, args.out)
         if args.command == "lock":
-            return _run_lock(args.library, args.skills, args.out)
+            return _run_lock(args.library, args.skills, args.out, {"openclaw": args.openclaw, "node": args.node})
         if args.command == "skill":
             return _run_skill(args)
         if args.command == "question":
             return _run_question(args)
         if args.command == "reconcile":
-            return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply, args.backup_dir)
+            return _run_reconcile(
+                args.host, args.library, args.target, args.pins, args.apply, args.backup_dir, args.diff
+            )
         if args.command == "integration":
             return _run_integration(args)
         if args.command == "host":
@@ -455,19 +471,27 @@ def _refuse(exc: ReconcileError) -> _Refusal:
     return _Refusal(exc.status, _REFUSAL_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc))
 
 
-def _run_lock(library: Path, skills: list[str], out_path: Path) -> int:
+def _run_lock(library: Path, skills: list[str], out_path: Path, runtime: dict[str, str | None] | None = None) -> int:
     _require_dir(library, "library")
     try:
         revisions = compute_revisions(LocalHost(library), skills)
     except ReconcileError as exc:
         raise _refuse(exc) from None
-    changed = _write_if_changed(out_path, dump_pins(revisions).encode("utf-8"))
-    _emit({"ok": True, "status": "ok", "changed": changed, "out": str(out_path), "skills": revisions})
+    pinned = {k: v for k, v in (runtime or {}).items() if v}
+    text = dump_pins(revisions, pinned)
+    try:
+        load_runtime_pins(text)
+    except LockfileError as exc:
+        raise _Refusal("invalid_pins", EXIT_INVALID_INPUT, error=str(exc)) from None
+    changed = _write_if_changed(out_path, text.encode("utf-8"))
+    _emit({"ok": True, "status": "ok", "changed": changed, "out": str(out_path), "skills": revisions,
+           "runtime": pinned})
     return EXIT_OK
 
 
 def _run_reconcile(
-    host_path: Path, library: Path, target: Path, pins_path: Path, apply: bool, backup_dir: Path | None = None
+    host_path: Path, library: Path, target: Path, pins_path: Path, apply: bool, backup_dir: Path | None = None,
+    want_diff: bool = False,
 ) -> int:
     descriptor_text = _read_utf8(host_path, "invalid_descriptor", EXIT_INVALID_INPUT, "host descriptor")
     try:
@@ -478,8 +502,10 @@ def _run_reconcile(
     pins_text = _read_utf8(pins_path, "invalid_pins", EXIT_INVALID_INPUT, "pins file")
     try:
         pins = load_pins(pins_text)
+        runtime = load_runtime_pins(pins_text)
     except LockfileError as exc:
         raise _Refusal("invalid_pins", EXIT_INVALID_INPUT, error=str(exc)) from None
+    _check_runtime(runtime)  # before anything else: a host on another OpenClaw or Node version is refused
 
     _require_dir(library, "library")
     _require_dir(target, "target")  # a typo must not silently create a new folder
@@ -490,12 +516,14 @@ def _run_reconcile(
             for argv in descriptor.smoke.commands
         ]
 
-    backup: dict[str, object] = {}
+    extra: dict[str, object] = {}
     try:
-        if apply and backup_dir is not None:
-            backup = _backup_before_apply(
-                reconcile(descriptor, LocalHost(library), LocalHost(target), pins, apply=False), target, backup_dir
-            )
+        if (apply and backup_dir is not None) or want_diff:
+            plan = reconcile(descriptor, LocalHost(library), LocalHost(target), pins, apply=False)
+            if want_diff:
+                extra["diff"] = review_diff(plan, LocalHost(target))  # from the plan, before anything is written
+            if apply and backup_dir is not None:
+                extra.update(_backup_before_apply(plan, target, backup_dir))
         report = reconcile(
             descriptor, LocalHost(library), LocalHost(target), pins, apply=apply, extra_checks=smoke_commands
         )
@@ -503,7 +531,7 @@ def _run_reconcile(
         raise _refuse(exc) from None
 
     code = {"rolled_back": EXIT_ROLLED_BACK, "rollback_failed": EXIT_ROLLBACK_FAILED}.get(report.status, EXIT_OK)
-    _emit({"ok": code == EXIT_OK, **report.to_dict(), **backup})
+    _emit({"ok": code == EXIT_OK, **report.to_dict(), **extra})
     return code
 
 
@@ -660,6 +688,11 @@ def _run_host(args: argparse.Namespace) -> int:
     base = {"host_id": descriptor.host_id, "client": descriptor.clients[0]}
     if args.action == "verify-skills":
         return _verify_skills(descriptor, base)
+    if args.action == "doctor":
+        allow = json.loads(text).get("doctor_allow", [])
+        if not isinstance(allow, list) or not all(isinstance(a, str) and a for a in allow):
+            raise _Refusal("invalid_descriptor", EXIT_INVALID_INPUT, error="'doctor_allow' must be a list of ids.")
+        return _doctor(base, set(allow))
     if args.action == "releases":
         return _releases(descriptor, base, args.releases)
     if args.action == "show":
@@ -787,3 +820,77 @@ def _backup_before_apply(plan, target: Path, backup_dir: Path) -> dict[str, obje
     except OSError as exc:
         raise _Refusal("backup_failed", EXIT_INVALID_INPUT, error=f"Nothing was changed; backup failed: {exc}") from None
     return {"backup": str(folder), "backed_up": sorted(paths)}
+
+
+def _installed_version(command: list[str], pattern: str) -> str | None:
+    import re
+    import subprocess
+
+    try:
+        done = subprocess.run([*command, "--version"], capture_output=True, text=True, timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    match = re.search(pattern, done.stdout) if done.returncode == 0 else None
+    return match.group(1) if match else None
+
+
+def _check_runtime(runtime: dict[str, str]) -> None:
+    """Pinned OpenClaw and Node versions must equal what the host runs (versions only, never other output)."""
+    import os
+    import shlex
+
+    commands = {
+        "openclaw": (shlex.split(os.environ.get("CSK_OPENCLAW", "openclaw")), r"OpenClaw\s+(\S+)"),
+        "node": (shlex.split(os.environ.get("CSK_NODE", "node")), r"v?(\d+\.\d+\.\d+)"),
+    }
+    for key, expected in runtime.items():
+        command, pattern = commands[key]
+        actual = _installed_version(command, pattern)
+        if actual is None:
+            raise _Refusal("runtime_unknown", EXIT_PIN, error=f"Cannot read the installed {key} version.")
+        if actual != expected:
+            raise _Refusal("runtime_mismatch", EXIT_PIN, runtime=key, pinned=expected, installed=actual,
+                           error=f"The pins require {key} {expected}; this host runs {actual}.")
+
+
+def _doctor(base: dict[str, object], allow: set[str]) -> int:
+    """`openclaw doctor --lint --json` must report nothing beyond a reviewed list of known findings.
+
+    doctor exits 1 on any warning (observed on 2026.11.3). In Docker one warning is expected: the gateway binds `lan`
+    inside the container because port publishing needs it. Skipping the check or dropping warnings would also hide new
+    ones, so findings are matched one by one against the descriptor's `doctor_allow` (requirement or check ids).
+    """
+    import os
+    import shlex
+    import subprocess
+
+    command = shlex.split(os.environ.get("CSK_OPENCLAW", "openclaw"))
+    try:
+        done = subprocess.run([*command, "doctor", "--lint", "--json"], capture_output=True, text=True,
+                              timeout=180, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _Refusal("openclaw_failed", EXIT_UNEXPECTED, error=f"openclaw doctor could not run: {type(exc).__name__}") from None
+    report = None
+    for line in reversed(done.stdout.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                report = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    if not isinstance(report, dict) or not isinstance(report.get("findings"), list):
+        raise _Refusal("openclaw_failed", EXIT_UNEXPECTED, error="openclaw doctor --lint --json returned no report.")
+    findings = []
+    for item in report["findings"]:
+        if not isinstance(item, dict):
+            continue
+        ids = {str(item.get("requirement") or ""), str(item.get("checkId") or "")} - {""}
+        findings.append({"check": item.get("checkId"), "requirement": item.get("requirement"),
+                         "severity": item.get("severity"), "allowed": bool(ids & allow)})
+    blocking = [f for f in findings if not f["allowed"]]
+    if blocking:
+        raise _Refusal("doctor_findings", EXIT_HOST_CHECK, **base, findings=findings,
+                       error=f"openclaw doctor reports {len(blocking)} finding(s) not in doctor_allow.")
+    _emit({"ok": True, "status": "ok", **base, "findings": findings})
+    return EXIT_OK
