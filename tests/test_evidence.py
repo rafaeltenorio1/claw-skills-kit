@@ -105,3 +105,20 @@ def test_history_without_an_evidence_file_is_refused(capsys, monkeypatch):
     monkeypatch.delenv("CSK_EVIDENCE", raising=False)
     code, out = run(capsys, "history")
     assert (code, out["status"]) == (10, "invalid_input")
+
+
+def test_an_approval_that_repeats_the_answer_is_refused(capsys, skill, log):
+    code, out = run(capsys, *answer(skill, "--apply", "--approval", "Save your summary style as bullets?"))
+    assert (code, out["status"]) == (10, "approval_has_answer_value")
+    assert not log.exists()
+
+
+def test_an_approval_that_repeats_a_question_answer_on_create_is_refused(capsys, tmp_path, log):
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    code, out = run(capsys, "skill", "create", str(skills), "--name", "r", "--description", "d",
+                    "--instructions", "Send it to the recipient in client-config.md.",
+                    "--question", "when", "When to send", "Friday at 11:00",
+                    "--apply", "--approval", "Create the report skill for Friday at 11:00?")
+    assert (code, out["status"]) == (10, "approval_has_answer_value")
+    assert not (skills / "r").exists()

@@ -325,6 +325,11 @@ def _record_approval(args: argparse.Namespace):
     if find_client_specifics(approval):
         raise _Refusal("approval_has_client_data", EXIT_INVALID_INPUT,
                        error="Write the approval without contact details, IDs, links or secrets.")
+    values = [getattr(args, "answer", None) or ""]
+    values += [q[2] for q in (getattr(args, "question", None) or []) if len(q) > 2]
+    if any(v.strip() and v.strip().casefold() in approval.casefold() for v in values):
+        raise _Refusal("approval_has_answer_value", EXIT_INVALID_INPUT,
+                       error='The approval must not repeat the answer: write "Save your answer to: <the question>".')
     try:
         return record_approval(path, args.command, getattr(args, "action", None), _target_of(args), approval), path
     except OSError as exc:
