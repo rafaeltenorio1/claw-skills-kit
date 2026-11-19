@@ -1,4 +1,4 @@
-from claw_skills_kit.models.hashing import revision_of, sha256_hex
+from claw_skills_kit.reconciler.hashing import revision_of, sha256_hex
 
 
 def test_sha256_hex_matches_a_known_value():

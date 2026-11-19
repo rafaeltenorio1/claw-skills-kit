@@ -284,3 +284,54 @@ def test_if_the_restore_itself_fails_that_is_reported_loudly(library, target_dir
 def test_report_is_json_serialisable(library, target):
     r = reconcile(desc(), library, target, pins(library), apply=True)
     assert json.loads(json.dumps(r.to_dict()))["status"] == "applied"
+
+
+# --- instance-only questions (Phase 2) ---------------------------------------------
+
+def add_instance_row(target, row):
+    """Add a row the way `append_fields` does: keep the file's final newline (or its absence)."""
+    cfg = target.read("alpha/client-config.md").decode()
+    end = "\n" if cfg.endswith("\n") else ""
+    target.write("alpha/client-config.md", (cfg.rstrip("\n") + "\n" + row + end).encode())
+
+
+def test_an_instance_question_survives_a_reconcile_with_its_answer(library_dir, library, target):
+    reconcile(desc(), library, target, pins(library), apply=True)
+    add_instance_row(target, "| interval_days | Instance | Every 7 days | 7 |")
+    (library_dir / "alpha/SKILL.md").write_text("# skill v2\n")  # golden skill changes
+
+    r = reconcile(desc(), library, target, pins(library), apply=True)
+
+    assert r.status == "applied"
+    assert "| interval_days | Instance | Every 7 days | 7 |" in target.read("alpha/client-config.md").decode()
+    assert r.removed_answers == {}
+
+
+def test_a_blank_instance_question_is_kept_and_reported_as_pending(library, target):
+    reconcile(desc(), library, target, pins(library), apply=True)
+    add_instance_row(target, "| interval_days | Instance | Every 7 days | |")
+
+    r = reconcile(desc(), library, target, pins(library))
+
+    assert r.status == "unchanged"
+    assert "interval_days" in r.pending_answers["alpha"]
+
+
+def test_instance_questions_do_not_change_the_golden_revision(library, target):
+    p = pins(library)
+    reconcile(desc(), library, target, p, apply=True)
+    add_instance_row(target, "| interval_days | Instance | Every 7 days | 7 |")
+    assert compute_revisions(library, ["alpha"]) == {"alpha": p["alpha"]}
+
+
+def test_when_the_golden_template_adopts_an_instance_key_the_answer_moves_to_its_row(library_dir, library, target):
+    reconcile(desc(), library, target, pins(library), apply=True)
+    add_instance_row(target, "| interval_days | Instance | Every 7 days | 7 |")
+    tpl = library_dir / "alpha/client-config.template.md"
+    tpl.write_text(tpl.read_text().rstrip("\n") + "\n| interval_days | Q4 | Every 3 days | |\n")
+
+    reconcile(desc(), library, target, pins(library), apply=True)
+
+    cfg = target.read("alpha/client-config.md").decode()
+    assert "| interval_days | Q4 | Every 3 days | 7 |" in cfg
+    assert "Instance" not in cfg

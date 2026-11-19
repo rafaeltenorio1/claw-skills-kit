@@ -4,10 +4,13 @@ import sys
 import traceback
 from pathlib import Path
 
+from claw_skills_kit.skills import NewQuestion, SkillError, apply_plan, plan_create, plan_remove
+from claw_skills_kit.questions import QuestionError, add_question, change_question, remove_question
 from claw_skills_kit.interview import InterviewError, apply_answers, load_answers, missing_required
 from claw_skills_kit.reconcile import ReconcileError, compute_revisions, reconcile
 from claw_skills_kit.reconciler.descriptor import DescriptorError, load_descriptor
 from claw_skills_kit.reconciler.host import LocalHost
+from claw_skills_kit.reconciler.layout import ANSWERS_FILE
 from claw_skills_kit.reconciler.lockfile import LockfileError, dump_pins, load_pins
 from claw_skills_kit.reconciler.smoke import CommandCheck
 from claw_skills_kit.template_format import FillError, TemplateFormatError, fill_answers, parse_template
@@ -24,6 +27,29 @@ EXIT_PIN = 9
 EXIT_INVALID_INPUT = 10
 EXIT_SKILL = 11
 EXIT_EXISTING_CONFIG = 12
+EXIT_QUESTION = 13
+EXIT_ANSWER_WOULD_BE_LOST = 14
+
+# QuestionError.status -> exit code.
+_QUESTION_CODES = {
+    "question_exists": EXIT_QUESTION,
+    "question_not_found": EXIT_QUESTION,
+    "golden_question": EXIT_QUESTION,
+    "invalid_question": EXIT_QUESTION,
+    "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
+    "invalid_existing_config": EXIT_EXISTING_CONFIG,
+}
+
+# SkillError.status -> exit code.
+_SKILL_CODES = {
+    "invalid_skill": EXIT_SKILL,
+    "skill_exists": EXIT_SKILL,
+    "skill_not_found": EXIT_SKILL,
+    "golden_skill": EXIT_SKILL,
+    "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
+    "rolled_back": EXIT_ROLLED_BACK,
+    "rollback_failed": EXIT_ROLLBACK_FAILED,
+}
 
 # ReconcileError.status -> exit code. A status not listed here is treated as a bug (exit 1).
 _REFUSAL_CODES = {
@@ -95,6 +121,54 @@ def _build_parser() -> argparse.ArgumentParser:
     rec_parser.add_argument(
         "--apply", action="store_true", help="Write the changes. Without it nothing is touched."
     )
+
+    q_parser = subparsers.add_parser(
+        "question",
+        help="Add, change or remove a question in one client's client-config.md (dry run unless --apply).",
+    )
+    q_sub = q_parser.add_subparsers(dest="action", required=True)
+    for action, help_text in (
+        ("add", "Add an instance-only question."),
+        ("change", "Change an instance question, or only the answer of a golden one."),
+        ("remove", "Remove an instance-only question."),
+    ):
+        a = q_sub.add_parser(action, help=help_text)
+        a.add_argument("skill_dir", type=Path, help="The skill folder on the host (holds client-config.md).")
+        a.add_argument("--key", required=True, help="Setting name (first column).")
+        if action in ("add", "change"):
+            a.add_argument("--suggested", required=action == "add", help="Suggested answer / question hint.")
+            a.add_argument("--answer", help="The client's answer (Value column).")
+        if action == "remove":
+            a.add_argument(
+                "--discard-answer", action="store_true", help="Allow removing a question that has an answer."
+            )
+        a.add_argument("--apply", action="store_true", help="Write the change. Without it nothing is touched.")
+
+    s_parser = subparsers.add_parser(
+        "skill", help="Create or remove a skill on one client's instance (dry run unless --apply)."
+    )
+    s_sub = s_parser.add_subparsers(dest="action", required=True)
+    create = s_sub.add_parser("create", help="Create a skill with SKILL.md and an empty client-config.md.")
+    create.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
+    create.add_argument("--name", required=True, help="Skill name: lowercase letters, digits, hyphens.")
+    create.add_argument("--description", required=True, help="One line: what the skill does.")
+    body = create.add_mutually_exclusive_group(required=True)
+    body.add_argument("--instructions", help="SKILL.md body (Markdown).")
+    body.add_argument(
+        "--instructions-file", type=Path, help="File holding the SKILL.md body; '-' reads it from stdin."
+    )
+    create.add_argument(
+        "--question", action="append", nargs="+", default=[], metavar="VALUE",
+        help="A settings question written with the skill: KEY SUGGESTED [ANSWER]. Repeat for each question.",
+    )
+    create.add_argument("--apply", action="store_true", help="Write the skill. Without it nothing is touched.")
+    remove = s_sub.add_parser("remove", help="Remove a skill that was created on this instance.")
+    remove.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
+    remove.add_argument("--name", required=True)
+    remove.add_argument(
+        "--discard-answers", action="store_true", help="Allow removing a skill whose questions have answers."
+    )
+    remove.add_argument("--apply", action="store_true", help="Delete the skill. Without it nothing is touched.")
     return parser
 
 
@@ -112,6 +186,10 @@ def main(argv: list[str] | None = None) -> int:
             return _run_fill(parser, args.skill_dir, args.answers, args.out)
         if args.command == "lock":
             return _run_lock(args.library, args.skills, args.out)
+        if args.command == "skill":
+            return _run_skill(args)
+        if args.command == "question":
+            return _run_question(args)
         if args.command == "reconcile":
             return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply)
         parser.error(f"Unknown command: {args.command}")
@@ -129,6 +207,14 @@ def _read_utf8(path: Path, status: str, code: int, what: str) -> str:
         return path.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise _Refusal(status, code, error=f"Cannot read {what}: {exc}") from None
+
+
+def _read_stdin_utf8(status: str, code: int, what: str) -> str:
+    """Text piped in by the caller (e.g. a heredoc), so long text needs no shell quoting."""
+    try:
+        return sys.stdin.buffer.read().decode("utf-8")
+    except (OSError, UnicodeDecodeError, AttributeError) as exc:
+        raise _Refusal(status, code, error=f"Cannot read {what} from stdin: {exc}") from None
 
 
 def _write_if_changed(path: Path, data: bytes) -> bool:
@@ -248,3 +334,75 @@ def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path
     code = {"rolled_back": EXIT_ROLLED_BACK, "rollback_failed": EXIT_ROLLBACK_FAILED}.get(report.status, EXIT_OK)
     _emit({"ok": code == EXIT_OK, **report.to_dict()})
     return code
+
+
+def _run_question(args: argparse.Namespace) -> int:
+    config_path = args.skill_dir / ANSWERS_FILE
+    if not config_path.is_file():
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error=f"No {ANSWERS_FILE} in {args.skill_dir}")
+    text = _read_utf8(config_path, "invalid_existing_config", EXIT_EXISTING_CONFIG, ANSWERS_FILE)
+    try:
+        if args.action == "add":
+            edit = add_question(text, args.key, args.suggested, args.answer or "")
+        elif args.action == "change":
+            edit = change_question(text, args.key, suggested=args.suggested, answer=args.answer)
+        else:
+            edit = remove_question(text, args.key, discard_answer=args.discard_answer)
+    except QuestionError as exc:
+        raise _Refusal(exc.status, _QUESTION_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+
+    if edit.text == text:
+        status, changed = "unchanged", False
+    elif args.apply:
+        changed = _write_if_changed(config_path, edit.text.encode("utf-8"))
+        status = "applied"
+    else:
+        status, changed = "planned", False
+    # keys only, never answer values
+    _emit({
+        "ok": True, "status": status, "changed": changed, "action": edit.action, "key": edit.key,
+        "discarded_answer": edit.had_answer and status == "applied", "out": str(config_path),
+    })
+    return EXIT_OK
+
+
+def _new_question(values: list[str]) -> NewQuestion:
+    if len(values) not in (2, 3):
+        raise _Refusal(
+            "invalid_question", EXIT_QUESTION,
+            error=f"--question takes KEY SUGGESTED [ANSWER]; got {len(values)} value(s).",
+        )
+    return NewQuestion(*values)
+
+
+def _run_skill(args: argparse.Namespace) -> int:
+    _require_dir(args.skills_dir, "skills folder")
+    skills = LocalHost(args.skills_dir)
+    try:
+        if args.action == "create":
+            if args.instructions_file == Path("-"):
+                instructions = _read_stdin_utf8("invalid_input", EXIT_INVALID_INPUT, "instructions")
+            elif args.instructions_file is not None:
+                instructions = _read_utf8(
+                    args.instructions_file, "invalid_input", EXIT_INVALID_INPUT, "instructions file"
+                )
+            else:
+                instructions = args.instructions
+            questions = [_new_question(values) for values in args.question]
+            plan = plan_create(skills, args.name, args.description, instructions, questions)
+        else:
+            plan = plan_remove(skills, args.name, discard_answers=args.discard_answers)
+        if args.apply:
+            apply_plan(skills, plan)
+    except SkillError as exc:
+        raise _Refusal(exc.status, _SKILL_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+    except QuestionError as exc:
+        raise _Refusal(exc.status, _QUESTION_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+
+    # keys only, never answer values
+    _emit({
+        "ok": True, "status": "applied" if args.apply else "planned", "action": plan.action,
+        "skill": plan.name, "files": sorted(plan.files), "questions": list(plan.questions),
+        "discarded_answers": plan.had_answers and args.apply,
+    })
+    return EXIT_OK

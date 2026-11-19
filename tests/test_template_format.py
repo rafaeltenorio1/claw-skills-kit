@@ -118,3 +118,56 @@ def test_rejects_an_empty_standard():
     text = doc("| k | Q1 | s | |\n").replace("| schedule | Every hour |", "| schedule |  |")
     with pytest.raises(TemplateFormatError, match="schedule"):
         parse_template(text)
+
+# --- instance-only questions -------------------------------------------------------
+
+from claw_skills_kit.models import Field  # noqa: E402
+from claw_skills_kit.template_format import FillError, append_fields, is_instance_field  # noqa: E402
+
+
+def instance(key="interval_days", suggested="Every 7 days", answer=""):
+    return Field(key=key, comes_from="Instance", suggested=suggested, answer=answer)
+
+
+def test_a_question_marked_instance_is_recognised_in_any_case():
+    assert is_instance_field(instance())
+    assert is_instance_field(Field("k", " instance ", "", ""))
+    assert not is_instance_field(Field("k", "Q1", "", ""))
+
+
+def test_append_adds_a_row_at_the_end_of_the_answers_table_and_keeps_every_other_byte():
+    text = FIXTURE.read_text()
+    out = append_fields(text, [instance(answer="7")])
+    sep = "\n" if not text.endswith("\n") else ""
+    assert out == text + sep + "| interval_days | Instance | Every 7 days | 7 |" + ("\n" if not sep else "")
+    assert parse_template(out).fields[-1] == instance(answer="7")
+
+
+def test_append_keeps_text_after_the_table():
+    text = doc("| q1 | Q1 | s | |\n") + "\n## Notes\nkeep me\n"
+    out = append_fields(text, [instance()])
+    assert out == doc("| q1 | Q1 | s | |\n| interval_days | Instance | Every 7 days | |\n") + "\n## Notes\nkeep me\n"
+
+
+def test_append_keeps_windows_line_endings_and_a_missing_final_newline():
+    crlf = doc("| q1 | Q1 | s | |").replace("\n", "\r\n")
+    out = append_fields(crlf, [instance()])
+    assert out == crlf + "\r\n| interval_days | Instance | Every 7 days | |"
+
+
+def test_append_to_an_empty_table_goes_right_after_the_separator():
+    out = append_fields(doc(""), [instance()])
+    assert out == doc("| interval_days | Instance | Every 7 days | |\n")
+
+
+@pytest.mark.parametrize("key", ["q1", "schedule"])
+def test_append_refuses_a_key_that_already_exists_as_a_question_or_a_standard(key):
+    with pytest.raises((FillError, TemplateFormatError)):
+        append_fields(doc("| q1 | Q1 | s | |\n"), [instance(key=key)])
+
+
+@pytest.mark.parametrize("bad", ["a|b", "a\nb", ""])
+def test_append_refuses_cells_that_break_the_table(bad):
+    field = instance(key=bad) if bad == "" else instance(suggested=bad)
+    with pytest.raises(FillError):
+        append_fields(doc(""), [field])

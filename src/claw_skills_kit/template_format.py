@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import NamedTuple
  
 from claw_skills_kit.models import Field, Template
@@ -11,6 +12,9 @@ _ANSWERS_HEADER = ("setting", "comes from", "suggested answer", "value")
 _VALUE_COLUMN = 3  
 
 _ANSWER_IS_REQUIRED = True
+
+# 'Comes from' value of a question that exists only on one client's instance (not in the golden template).
+INSTANCE_SOURCE = "Instance"
  
  
 class TemplateFormatError(ValueError):
@@ -30,6 +34,7 @@ class _Table(NamedTuple):
     header: list[str]
     header_line: int
     rows: list[tuple[int, list[str]]]  # (line number, cells)
+    end_line: int  # line number of the table's last line (separator or last row)
  
  
 def parse_template(text: str) -> Template:
@@ -110,7 +115,7 @@ def _read_table(name: str, section: _Section) -> _Table:
             )
         rows.append((line_no, cells))
  
-    return _Table(header, header_line, rows)
+    return _Table(header, header_line, rows, table_lines[-1][0])
  
  
 def _check_header(name: str, table: _Table, expected: tuple[str, ...]) -> None:
@@ -245,3 +250,112 @@ def fill_answers(text: str, template: Template) -> str:
     table = _read_answers_table(text)
     _check_keys_match(fields, table)
     return _patch_rows(text, table, fields)
+
+def is_instance_field(field: Field) -> bool:
+    """True for a question added to one client's instance (marked in the 'Comes from' column)."""
+    return field.comes_from.strip().casefold() == INSTANCE_SOURCE.casefold()
+
+
+def append_fields(text: str, fields: Sequence[Field]) -> str:
+    """Add one row per field at the end of the 'Client answers' table; every other byte stays the same.
+
+    Rows are written as `| key | comes from | suggested | value |`. The result is parsed again, so a key
+    that clashes with an existing setting or a standard is refused instead of written.
+    """
+    if not fields:
+        return text
+    table = _read_answers_table(text)
+    existing = {cells[0] for _, cells in table.rows}
+    new_keys: set[str] = set()
+    rows = []
+    for field in fields:
+        cells = (field.key, field.comes_from, field.suggested, field.answer)
+        if not field.key.strip():
+            raise FillError("A new setting needs a name.")
+        if not all(_fits_in_a_cell(cell) for cell in cells):
+            raise FillError(f"Setting {field.key!r}: cells cannot contain '|' or line breaks.")
+        if field.key in existing or field.key in new_keys:
+            raise FillError(f"Setting {field.key!r} already exists.")
+        new_keys.add(field.key)
+        rows.append("|" + "|".join(f" {c.strip()} " if c.strip() else " " for c in cells) + "|")
+
+    lines = text.splitlines(keepends=True)
+    last = lines[table.end_line - 1]
+    body = last.rstrip("\r\n")
+    ending = last[len(body):]
+    if ending:  # the table's last line ends with a newline: each new row keeps the same ending
+        new_lines = [row + ending for row in rows]
+    else:  # the table ends the file with no final newline: keep it that way
+        newline = next((ln[len(ln.rstrip("\r\n")):] for ln in lines if ln.endswith("\n")), "\n")
+        lines[table.end_line - 1] = body + newline
+        new_lines = [row + newline for row in rows]
+        new_lines[-1] = rows[-1]
+    lines[table.end_line:table.end_line] = new_lines
+    result = "".join(lines)
+    parse_template(result)  # raises TemplateFormatError if the new rows break the document
+    return result
+
+
+_SUGGESTED_COLUMN = 2
+
+
+def _find_row(table: _Table, key: str) -> int:
+    for line_no, cells in table.rows:
+        if cells[0] == key:
+            return line_no
+    raise FillError(f"Setting {key!r} is not in the client answers.")
+
+
+def _set_cell(line: str, column: int, value: str) -> str:
+    body = line.rstrip("\r\n")
+    ending = line[len(body):]
+    parts = body.split("|")
+    parts[column + 1] = f" {value} " if value else " "
+    return "|".join(parts) + ending
+
+
+def update_field(text: str, key: str, *, suggested: str | None = None, answer: str | None = None) -> str:
+    """Change the suggested answer and/or the value of one row; every other byte stays the same."""
+    for value in (suggested, answer):
+        if value is not None and not _fits_in_a_cell(value.strip()):
+            raise FillError(f"Setting {key!r}: cells cannot contain '|' or line breaks.")
+    table = _read_answers_table(text)
+    line_no = _find_row(table, key)
+    lines = text.splitlines(keepends=True)
+    if suggested is not None:
+        lines[line_no - 1] = _set_cell(lines[line_no - 1], _SUGGESTED_COLUMN, suggested.strip())
+    if answer is not None:
+        lines[line_no - 1] = _set_cell(lines[line_no - 1], _VALUE_COLUMN, answer.strip())
+    return "".join(lines)
+
+
+def remove_field(text: str, key: str) -> str:
+    """Delete one row of the client answers table; every other byte stays the same."""
+    table = _read_answers_table(text)
+    line_no = _find_row(table, key)
+    lines = text.splitlines(keepends=True)
+    removed = lines.pop(line_no - 1)
+    if line_no - 1 == len(lines) and not removed.endswith("\n") and lines:
+        # the removed row was the last line with no final newline: keep the file without one
+        prev = lines[-1]
+        lines[-1] = prev.rstrip("\r\n")
+    return "".join(lines)
+
+
+def new_client_config(skill: str) -> str:
+    """An empty client-config.md for a skill created on one instance: no standards, no questions yet."""
+    text = (
+        f"# {skill}: settings (Layer 2)\n"
+        "\n"
+        "Created for this client's instance. Every question here was confirmed by the client.\n"
+        "\n"
+        "## Standards\n"
+        "| Setting | Standard |\n"
+        "|---|---|\n"
+        "\n"
+        "## Client answers\n"
+        "| Setting | Comes from | Suggested answer | Value |\n"
+        "|---|---|---|---|\n"
+    )
+    parse_template(text)  # the empty document must already be valid
+    return text
