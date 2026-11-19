@@ -21,6 +21,12 @@ RUN uv venv /opt/claw-skills-kit/venv --python 3.14 \
 COPY skills/skill-manager /opt/claw-skills-kit/skill-manager
 # The golden skill library, one folder per release with its pins. Owned by root: the agent can read, not edit.
 COPY library /opt/claw-skills-kit/library
+# Rollback demo, off by default: CSK_DEMO_ROLLBACK=1 adds the releases in library/demo-releases (broken on
+# purpose) to the library the agent sees. docker/up.sh passes it through.
+ARG CSK_DEMO_ROLLBACK=0
+RUN if [ "$CSK_DEMO_ROLLBACK" = "1" ]; then \
+        cp -r /opt/claw-skills-kit/library/demo-releases/. /opt/claw-skills-kit/library/releases/; \
+    fi
 COPY host/AGENTS.csk.md /opt/claw-skills-kit/AGENTS.csk.md
 COPY docker/bootstrap.sh docker/apply_agents_rules.py /opt/claw-skills-kit/
 RUN chmod 0755 /opt/claw-skills-kit/bootstrap.sh /opt/claw-skills-kit/skill-manager/scripts/lk

@@ -18,8 +18,9 @@ from claw_skills_kit.template_format import fill_answers, parse_template
 
 RELEASES = Path(__file__).parent.parent / "library/releases"
 ALL = sorted(p.name for p in RELEASES.iterdir() if p.is_dir())
-BROKEN = sorted(r for r in ALL if (RELEASES / r / "BROKEN_ON_PURPOSE.md").exists())  # rollback demo
-GOOD = [r for r in ALL if r not in BROKEN]
+DEMO = Path(__file__).parent.parent / "library/demo-releases"  # broken on purpose, off by default
+BROKEN = sorted(p.name for p in DEMO.iterdir() if p.is_dir())
+GOOD = ALL
 OLD, NEW = "2026.11.10", "2026.11.18"
 
 
@@ -42,11 +43,16 @@ def test_both_demo_releases_exist():
     assert OLD in ALL and NEW in ALL
 
 
-@pytest.mark.parametrize("release", ALL)
-def test_pins_match_the_skills_in_the_release(release):
-    pins = load_pins((RELEASES / release / "skills.lock.json").read_text(encoding="utf-8"))
-    assert sorted(pins) == skills_of(release)
-    assert compute_revisions(LocalHost(RELEASES / release / "skills"), sorted(pins)) == dict(pins)
+@pytest.mark.parametrize("folder", [RELEASES / r for r in ALL] + [DEMO / r for r in BROKEN])
+def test_pins_match_the_skills_in_the_release(folder):
+    pins = load_pins((folder / "skills.lock.json").read_text(encoding="utf-8"))
+    assert sorted(pins) == sorted(p.name for p in (folder / "skills").iterdir() if p.is_dir())
+    assert compute_revisions(LocalHost(folder / "skills"), sorted(pins)) == dict(pins)
+
+
+def test_the_default_library_has_no_broken_release():
+    assert not any((RELEASES / r / "BROKEN_ON_PURPOSE.md").exists() for r in ALL)
+    assert all((DEMO / r / "BROKEN_ON_PURPOSE.md").exists() for r in BROKEN)
 
 
 @pytest.mark.parametrize("release", GOOD)
@@ -121,6 +127,6 @@ def test_the_rollback_demo_release_is_still_broken_on_purpose():
     fake = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fake)
     assert BROKEN == ["2026.11.25"]
-    text = (RELEASES / "2026.11.25/skills/meeting-notes/SKILL.md").read_text(encoding="utf-8")
+    text = (DEMO / "2026.11.25/skills/meeting-notes/SKILL.md").read_text(encoding="utf-8")
     assert "\ndesciption: " in text and "\ndescription: " not in frontmatter(text)
     assert not fake.readable(text, "meeting-notes")

@@ -143,14 +143,20 @@ def installed(tmp_path):
     return host, skills, install
 
 
-def test_releases_reports_current_and_the_next_one(capsys, installed):
+def test_releases_reports_current_and_the_next_one(capsys, installed, tmp_path):
     host, skills, install = installed
     install("2026.11.10")
     code, out = run(capsys, "releases", "--host", str(host), "--releases", str(RELEASES))
     assert (code, out["current"], out["next"]) == (0, "2026.11.10", "2026.11.18")
     install("2026.11.18")
     code, out = run(capsys, "releases", "--host", str(host), "--releases", str(RELEASES))
-    assert (out["current"], out["next"], out["newer"]) == ("2026.11.18", "2026.11.25", ["2026.11.25"])
+    assert (out["current"], out["next"], out["newer"]) == ("2026.11.18", None, [])
+    # with the rollback demo on, the broken release is the next one (as the image does with CSK_DEMO_ROLLBACK=1)
+    both = tmp_path / "with-demo"
+    shutil.copytree(RELEASES, both)
+    shutil.copytree(ROOT / "library/demo-releases/2026.11.25", both / "2026.11.25")
+    code, out = run(capsys, "releases", "--host", str(host), "--releases", str(both))
+    assert (out["current"], out["next"]) == ("2026.11.18", "2026.11.25")
 
 
 def test_answers_do_not_make_a_host_look_out_of_date(capsys, installed):

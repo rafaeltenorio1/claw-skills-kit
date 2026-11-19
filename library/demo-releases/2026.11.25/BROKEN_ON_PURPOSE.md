@@ -8,4 +8,7 @@ What should happen when it is applied: the smoke check `lk host verify-skills` f
 reconciler restores every file it touched and verifies them by reading them back, and reports `rolled_back`
 (exit 6). The host keeps the previous release.
 
+It lives in `library/demo-releases/`, outside the library the agent sees, and is added to it only when the
+image is built with `CSK_DEMO_ROLLBACK=1 docker/up.sh`; a plain `docker/up.sh` leaves it out again.
+
 The agent does not read this file; `tests/test_library.py` checks that the defect is still there.

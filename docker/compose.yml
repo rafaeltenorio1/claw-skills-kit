@@ -10,6 +10,8 @@ services:
       args:
         # with a browser by default; set CSK_OPENCLAW_BASE=ghcr.io/openclaw/openclaw:2026.11.3 for the smaller image
         OPENCLAW_BASE: ${CSK_OPENCLAW_BASE:-ghcr.io/openclaw/openclaw:2026.11.3-browser}
+        # 1 = add the release that is broken on purpose (rollback demo); default 0
+        CSK_DEMO_ROLLBACK: ${CSK_DEMO_ROLLBACK:-0}
     image: csk-openclaw:${CSK_IMAGE_TAG:-local}
     env_file:
       - path: ${CSK_ENV_FILE:-${HOME}/.config/csk/openclaw-test.env}
