@@ -1,120 +1,119 @@
 # Design decisions
 
-Each entry: what was decided, why, and what was set aside. "(Rafael)" marks a choice he made between options.
-Assumptions and observed OpenClaw behaviour are in `assumptions.md`.
+The choices I made, why, and what I set aside. Things I had to assume are in `assumptions.md`.
 
-## Toolkit
+## The toolkit
 
-**D1. A stdlib-only Python CLI: one JSON object on stdout, a documented exit code.** The spec's operators are agents at
-a shell, so every outcome must be machine-readable and never need a prompt. No third-party runtime dependency.
+1. **A plain Python CLI that prints one JSON object and exits with a documented code.** The fleet is run by agents at
+   a shell, so every result has to be readable by a program and nothing can wait for a prompt. Standard library only.
 
-**D2. Only `template_format.py` knows the Markdown layout, and only the Value column is ever written.** Every other
-byte of `client-config.md` stays identical, so a diff of a client's file shows exactly the answers that changed.
-Rewriting the tables was set aside: it would reformat what the client sees.
+2. **Only one module knows the settings file's Markdown layout, and it only ever writes the answer column.** Every
+   other byte of a client's `client-config.md` stays the same, so a diff of that file shows exactly what changed.
 
-**D3. A skill's revision is a content hash that excludes `client-config.md`.** Pins in `skills.lock.json` stay valid
-while a client answers or adds questions. A git commit as the revision is not used yet (see `assumptions.md`).
+3. **A skill's revision is a hash of its files, without the client's settings file.** Clients can answer questions or
+   add their own without the host looking out of date against its pins.
 
-**D4. The reconciler refuses before writing, is a dry run by default, and restores verified by read-back.** Every
-refusal (tenant, pins, library, unreadable config, template) happens before the first write. On a failed check every
-touched file is put back and read again: `rolled_back` only if they match, otherwise `rollback_failed` with the paths.
+4. **The reconciler refuses before it writes, is a dry run by default, and checks its own rollback.** Every refusal
+   (two tenants, wrong pins, wrong versions, unreadable settings) happens before the first write. If a check fails
+   after writing, every file is put back and read again; it only says "rolled back" if they really match.
 
-**D5. Answers travel by key; blank answers never block an install and are never invented.** A template change keeps
-answers whose key still exists, reports removed ones by key (`removed_answers`) and blank ones as `pending_answers`.
-Values come from the client (interview) or from the host, never from the toolkit or the agent.
+5. **Answers follow their question by key, and nothing invents them.** A template change keeps answers whose key still
+   exists, reports removed ones by key, and lists blank ones as pending. Answers come from the client, never from the
+   toolkit or the agent.
 
-**D6. Reports never contain answer values or secrets.** Paths, hashes, keys and variable names only. This is why the
-reconciler's output is a list of changes with hashes rather than a text diff (see README, gaps).
+6. **Reports never contain answer values or secrets.** Only paths, hashes, keys and variable names. The review diff
+   follows the same rule: skill files appear as a normal diff, the settings file only by which keys changed.
 
 ## Changes by conversation
 
-**D7. Per-instance by default (Rafael).** A client's request changes their gateway only. A golden question can only get
-a new answer per instance; changing a golden skill for everyone is a separate, operator side release.
+7. **A client's request changes only their own gateway.** A operator question can get a new answer on one instance, but
+   changing a golden skill for everyone is a new release on the operator's side.
 
-**D8. Instance-only questions are extra rows in the same `## Client answers` table, marked `Instance` (Rafael).**
-`reconcile` keeps them (row and answer); if the golden template later adopts the key, the answer moves to the golden
-row. An overlay file was set aside: two files to keep in step on every host.
+8. **Questions that only one client has are extra rows in the same table, marked `Instance`.** The reconciler keeps
+   them across updates. I set aside a separate overlay file because it would be one more file to keep in step on every
+   host.
 
-**D9. The agent never edits Markdown itself; it calls deterministic commands.** `question add|change|remove`,
-`skill create|remove`, `integration`, `reconcile`. The agent chooses the operation and fills the fields; the format
-is guarded by code, not by the model.
+9. **The agent never edits Markdown by itself.** It chooses an operation and fills in the fields; small deterministic
+   commands do the writing, so the file format is protected by code instead of by the model.
 
-**D10. `skill create` takes its questions in the same call, and the body from stdin.** One dry run checks the whole
-change and one `--apply` writes it with rollback; a heredoc avoids shell quoting (an apostrophe broke the first try).
+10. **Creating a skill takes its questions in the same command.** One dry run checks the whole change and one apply
+    writes it, with rollback. Instructions go in through stdin so quotes and apostrophes don't break anything.
 
-**D11. Nothing changes without a yes to a plain-language question, even after a direct instruction (Rafael).** The
-agent restates the change and asks "Shall I?"; only the answer to that question counts. The one exception is the
-answer to a settings question the agent asked. The rule lives in a block at the top of the workspace `AGENTS.md`,
-because the agent does not always load `skill-manager` (OpenClaw's default `AGENTS.md` says "Do freely" and
-"Automations - Be Proactive").
+11. **Nothing changes without a yes to a plain question, even after a direct instruction.** The agent repeats the
+    change and asks "Shall I?"; only that answer counts. The only exception is answering a settings question the
+    agent just asked. I put this rule at the top of the workspace `AGENTS.md`, because the agent does not always load
+    the skill manager, and OpenClaw's default `AGENTS.md` tells it to act freely and be proactive with automations.
 
-**D12. Schedules are a separate yes that states the cost; a plain reminder may be just an automation (Rafael).** Each
-automated run uses the AI service. A schedule takes its time from the skill's settings and the skill's name.
+12. **A schedule is its own yes, and the agent says it costs money.** Every automatic run uses the AI service. A
+    simple reminder can be just an automation; anything with settings becomes a skill.
 
-**D13. Secrets never go through the chat.** The agent never asks for a key and refuses one that is pasted, asking for
-it to be replaced. Integrations store keys only as references (`{source: env, provider: default, id: VAR}`).
+13. **Secrets never go through the chat.** The agent never asks for a key and refuses one that gets pasted, asking for
+    it to be replaced. Integrations only store references to keys.
 
 ## Library and updates
 
-**D14. A sample library with releases, each with its pins and plain-language notes.** Skills follow the spec's
-template (`SKILL.md` sections, `client-config.template.md`, `interview.md` with at most three questions,
-`lineage.md`). The agent explains an update from `RELEASE.md` and `lineage.md`, not from file names.
+14. **A sample library organised in releases.** Each release has the skills, their pins and short notes in plain
+    words, and each skill follows the spec's template. The agent explains an update from those notes, not from file
+    names.
 
-**D15. Updates go one release at a time, from the release the host runs.** `host releases` finds the current release by
-comparing installed revisions with each release's pins. Jumping to the newest was set aside: it hides the
-intermediate notes and makes a broken release harder to locate.
+15. **Updates go one release at a time.** The toolkit finds the release a host runs by comparing what is installed
+    with each release's pins. Jumping straight to the newest would hide the notes in between and make a bad release
+    harder to find.
 
-**D16. A host that matches no release has drifted, and is adopted only after a yes, with a backup.** The closest
-release is applied, answers are kept, and every file that will be replaced is first copied to a dated backup. A
-hand-made client rule is offered back as a setting, never as skill text.
+16. **A hand-edited host is brought back only after a yes, with a backup.** It is reset to the closest release, keeps
+    its answers, and the files that get replaced are copied first. If the hand edit was really a client rule, the agent
+    offers to keep it as a setting instead.
 
-**D17. A smoke check that OpenClaw actually loaded the managed skills (`host verify-skills`).** On 2026.11.3 a skill
-OpenClaw cannot read disappears from its inventory while `config validate` and `skills list` still exit 0, so those
-two alone would accept a broken release. The check forces a rescan first (see `assumptions.md`, O2).
+17. **The smoke checks confirm the skills actually loaded.** I found that a skill OpenClaw cannot read simply
+    disappears while `config validate` and `skills list` still succeed, so those two alone would accept a broken
+    release.
 
-**D18. The rollback demo release is opt-in.** `library/demo-releases/2026.11.25` is broken on purpose and only enters
-the image with `CSK_DEMO_ROLLBACK=1`, so an ordinary "any updates?" never offers it by accident.
+18. **`doctor --lint` passes with a reviewed list of accepted findings.** In Docker it always warns that the gateway
+    listens on all interfaces, which the container needs. Skipping the security check or dropping all warnings would
+    also hide new problems, so the host description names the one finding I accept and anything else fails. Before
+    installing anything, the setup runs OpenClaw's own repair (`doctor --fix`), because a fresh state has pending
+    migrations that `doctor` reports.
 
-## Integrations, tenants, evidence, Layer 1
+19. **The pins also fix the OpenClaw and Node versions.** The reconciler refuses a host running other versions, so an
+    upgrade is always an explicit change to the pins file.
 
-**D19. Integrations orchestrate OpenClaw's own config commands.** `integration enable` sets only variables the skill
-declares in `requires.env`, refuses values that look like secrets, takes the key only as a reference, validates,
-checks that the skill loads, and restores the `skills.entries.<skill>` block on failure. It never edits
-`openclaw.json` by hand and never touches the skill. The snapshot is read from the config file because `config get`
-redacts reference ids.
+20. **The broken release for the rollback demo is opt-in.** It only goes into the image when asked, so an ordinary
+    "any updates?" never offers it by accident.
 
-**D20. The tenant rule is shown in chat by the reconciler's own check.** `host check-client` runs `check_single_tenant`
-on the host's client plus the requested one (exit 8). `reconcile` refuses a two-client descriptor on its own; the
-check only makes the guarantee visible before anyone tries.
+## Integrations, tenants, records, client data
 
-**D21. Approvals are recorded before the change and the outcome after.** With `CSK_EVIDENCE` set, `--apply` needs
-`--approval`, refused if it holds contact details, secrets or the answer itself. Two fsync'ed JSON lines per change;
-`lk history` merges them. Recording inside OpenClaw's own transcript was set aside: it is not structured and holds the
-whole conversation.
+21. **Integrations use OpenClaw's own config commands.** Enabling one only sets variables the skill declares, refuses
+    values that look like secrets, takes a key only as a reference, and puts the config back if the skill still does
+    not load. It never edits the config file by hand or touches the skill.
 
-**D22. A Layer 1 validator with the spec's list.** Emails, phone numbers, chat channels and IDs, drive links, secrets
-and URL credentials, reported by kind and line only. `skill create` refuses them; `lint --golden` checks a library.
+22. **The one-tenant rule is shown in chat through the reconciler's own check.** The agent asks the same check the
+    reconciler uses; the reconciler would refuse anyway.
 
-## Docker host
+23. **Every applied change is recorded: the approval before, the result after.** Where recording is on, an apply
+    needs an approval text, which may not contain the answer itself, contact details or secrets. The agent answers
+    "what changed?" from this record. I did not use OpenClaw's chat history for this because it is not structured and
+    holds the whole conversation.
 
-**D23. The Control UI in a browser is the interface (Rafael).** Served by the gateway on host loopback.
+24. **A check for client data in skills.** Emails, phone numbers, chat channels and IDs, document links and secrets
+    are refused in a skill's text and reported by kind and line only. The same check runs over a whole library.
 
-**D24. A fresh instance, the toolkit baked into the image, OpenClaw pinned (Rafael).** `ghcr.io/openclaw/openclaw:
-2026.11.3-browser` (the plain image is one variable away). The image's Python is 3.11, so the toolkit runs in its own
-3.14 venv. `bootstrap.sh` redoes the whole setup and is safe to run again.
+## The Docker host
 
-**D25. Costly defaults off.** The bundled `skill-creator` (it would let the agent write skill files freely), the
-30-minute heartbeat and memory dreaming are turned off; each would spend model calls.
+25. **The Control UI in the browser is the interface**, served by the gateway on the host's loopback.
 
-## Repository
+26. **A fresh instance with the toolkit built into the image and OpenClaw pinned.** The setup script redoes the whole
+    configuration and can be run again safely. The image comes with a browser; a smaller image without it is one
+    setting away.
 
-**D26. Merge commits, not squash, for the project's pull requests (Rafael).** The spec looks at whether the commits read
-as a sequence; the small commits stay visible on `staging`.
+27. **Defaults that cost model calls are off:** the bundled skill creator (it would let the agent write skill files
+    freely), the 30-minute heartbeat and memory dreaming.
 
-## Open
+## The repository
 
-- **The `doctor --lint` rule.** It exits 1 in Docker only because of the expected `gateway.bind: lan` warning. Options:
-  a smoke check that passes when every finding is in a reviewed allowlist (by requirement id); `--severity-min error`
-  (hides every warning, including new ones); or a network setup that does not need `lan`. Needs the operator's view.
-- **The revision:** content hash (today) or git commit plus per-file hash.
-- **Where the reconciler runs:** on the host (today) or from an operations agent over the tailnet.
+28. **Pull requests are merged with merge commits.** The small commits stay visible as a sequence.
+
+## Still open
+
+- Whether the accepted `doctor` finding is acceptable to operator, or the network setup should change instead.
+- Pins by content hash (today) or by git revision as well.
+- Whether the reconciler should run on the host (today) or from an operations agent over the tailnet.

@@ -1,159 +1,155 @@
 # claw-skills-kit
 
-A small, stdlib-only Python toolkit for operator golden skills on OpenClaw gateways, and a Docker host where every check
-the project spec asks for is shown **through a conversation with the agent**.
+My project project for operator: a small Python toolkit for golden skills on OpenClaw gateways, and a Docker host where
+everything the spec asks for can be shown by simply talking to the agent.
 
-- **Interview runner** (`fill`, and the agent's interview in chat): fills a skill's Layer 2 settings from the client's
-  answers and refuses blank required answers.
-- **Reconciler** (`reconcile`): brings a gateway that already runs to a pinned library release, keeps the client's
-  answers, runs smoke checks, rolls back on failure, and reports what changed.
-- **Skill manager** (`skills/skill-manager/`): the agent-facing skill. The client asks in plain words; the agent
-  proposes, waits for a yes, and only then runs the toolkit's commands.
+What I built:
 
-Every command runs non-interactively, prints one JSON object and exits with a documented code.
+- **Interview runner.** Fills a skill's client settings from the client's answers and refuses blank required answers.
+  In chat, the agent finds the blank questions and asks them in plain words.
+- **Reconciler.** Brings a gateway that is already running to a pinned release of the skill library: keeps the
+  client's answers, runs smoke checks, rolls back if they fail, and shows what changed.
+- **Skill manager.** The skill the agent reads. The client asks for something in plain words; the agent proposes it,
+  waits for a yes, and only then runs the toolkit's commands.
 
-## Quick start
+Every command runs without prompts, prints one JSON object and exits with a documented code, because in the fleet an
+agent is the one running them.
 
-Needs Docker (tested with Docker Desktop on Windows + WSL2) and an env file **outside the repository** with
-`OPENCLAW_GATEWAY_TOKEN` and `ANTHROPIC_API_KEY` (default `~/.config/csk/openclaw-test.env`, `export NAME=value`
-lines). Values never enter the repository, the image or the generated config: they are env references.
+## Running it
+
+You need Docker (I used Docker Desktop on Windows with WSL2) and an env file **outside the repository** with
+`OPENCLAW_GATEWAY_TOKEN` and `ANTHROPIC_API_KEY` (by default `~/.config/csk/openclaw-test.env`). The values never
+go into the repository, the image or the generated config; OpenClaw only gets references to them.
 
 ```bash
-docker/up.sh                          # build, configure, start; then open http://127.0.0.1:18790/
-CSK_DEMO_ROLLBACK=1 docker/up.sh   # also add a library release that is broken on purpose
-CSK_DEMO_DRIFT=1 docker/up.sh      # also edit an installed operator skill by hand (a drifted host)
-docker compose -f docker/compose.yml down -v   # delete the instance and its state
+docker/up.sh                          # build, configure and start; then open http://127.0.0.1:18790/
+CSK_DEMO_ROLLBACK=1 docker/up.sh   # also add a library release I broke on purpose
+CSK_DEMO_DRIFT=1 docker/up.sh      # also edit an installed skill by hand, like an old host
+docker compose -f docker/compose.yml down -v   # throw the instance away
 ```
 
-Without Docker: `uv run pytest -q` (385 tests) and `uv run python -m claw_skills_kit --help`.
+Without Docker: `uv run pytest -q` runs the tests, and `uv run python -m claw_skills_kit --help` lists the commands.
 
-## What the spec asks, and how it shows
+## What the spec asks, and where it shows
 
-| Spec requirement | In chat (Docker host) | Code |
+| Spec | What you see in chat | Command behind it |
 |---|---|---|
-| Non-interactive commands, exit codes, structured output | the agent runs them and reads the JSON | every command |
-| Interview runner, refuse blank required answers | the agent finds blank answers and asks the skill's `interview.md` questions | `fill`, `question change` |
-| Install or update skills, keep the client's answers | "Are there any updates?" -> notes in plain words -> yes -> applied, answers kept, new question asked | `host releases`, `reconcile` |
-| Second run changes nothing | checked by command, not in chat: the same release again reports `unchanged` | `reconcile` |
-| Failed smoke leaves the host as it was | a broken release is applied, the check fails, every file is restored and verified | `reconcile`, `host verify-skills` |
-| Skill needing an integration loads only once enabled | "Can I use the team digest?" -> connect the channel -> it loads; the skill file never changes | `integration` |
-| Refuse two tenants in one gateway | a request for another business is refused | `host check-client`, `reconcile` (exit 8) |
-| No secrets in output | a pasted token is refused and the client is asked to replace it | `secrets audit --check` clean |
-| Approvals from a human in chat, recorded | even a direct instruction gets "Shall I?"; "What changed?" is answered from the record | `--approval`, `history` |
-| No client specifics in Layer 1 | "a skill that emails joao@..." -> the address becomes a setting | `skill create`, `lint` |
-| Patch a host that already exists (drift) | hand edits are found, explained, reverted with a backup, answers kept | `host releases`, `reconcile --backup-dir` |
+| Interview runner | the agent asks the skill's blank questions (at most three) | `fill`, `question change` |
+| Install or update, keep the client's answers | "Are there any updates?" -> what changes, in plain words -> yes -> done, answers kept | `host releases`, `reconcile` |
+| A failed smoke test leaves the host as it was | a broken release fails its checks and everything is put back | `reconcile` |
+| `doctor --lint` and `config validate` pass at the pinned version | part of every update's checks | `host doctor` |
+| A skill that needs an integration loads only once enabled | "Can I use the team digest?" -> connect the channel -> it loads, the skill is untouched | `integration` |
+| Refuse two tenants on one gateway | a request for another business is refused | `host check-client` |
+| No secrets in output | a pasted token is refused and the client is told to replace it | `secrets audit --check` |
+| Approvals from a human, recorded | the agent asks "Shall I?" before anything; "What changed?" comes from the record | `--approval`, `history` |
+| No client specifics in a skill | "a skill that emails joao@..." -> the address becomes a setting | `skill create`, `lint` |
+| Patch a host that already runs | hand edits are found, explained and reverted with a backup, answers kept | `host releases`, `reconcile` |
+| Pin skill, gateway and Node versions | a host on another version is refused | `reconcile` |
+| The diff is the review artifact | the planned change as a text diff (settings shown by key, never by value) | `reconcile --diff` |
 
-## What works, and how it was checked
+## What works, and how I checked it
 
-Checked on **OpenClaw 2026.11.3** (`ghcr.io/openclaw/openclaw:2026.11.3-browser`) in Docker, by chatting with the agent
-in the Control UI, then reading the agent's transcript and the files on the host. Model: `anthropic/claude-opus-5-5`.
+I tested on OpenClaw 2026.11.3 in Docker. For each flow I chatted with the agent in the Control UI and then checked
+the agent's transcript and the files on the host, so I am not relying on what the agent says it did.
 
-- **Tests:** `uv run pytest -q`, 385 passed. `tests/fake_openclaw.py` stands in for the five OpenClaw commands the
-  integration code calls.
-- **Interview:** blank answers found and asked; only the Value cells of `client-config.md` changed.
-- **Update 2026.11.10 -> 2026.11.18:** dry run, yes, `applied` with four checks (integrity, `config validate`,
-  `skills list`, `host verify-skills`); answers kept; the new question asked. Running the same release again
-  (by command, in a throwaway instance) reported `unchanged`.
-- **Rollback:** update to the broken release `2026.11.25`: `rolled_back` (exit 6), the three skills byte-identical to
-  2026.11.18 afterwards, host still on 2026.11.18.
-- **Integration:** `team-digest` was `disabled`; after "connect it to #team-acme" and a yes, `ready`; the skill file
-  never changed; `config validate` and `secrets audit --check` clean.
-- **Tenant:** a request for "Beta Corp": `host check-client` exit 8, refused in plain words, descriptor unchanged.
-- **Approvals:** direct instructions answered with "Shall I?"; "no" changed nothing; with `CSK_EVIDENCE` set, an
-  apply without `--approval` is refused; "What have you changed?" answered from `lk history`.
-- **Layer 1:** a skill asked with an email in its text was created with the email as a setting only (0 occurrences in
-  `SKILL.md`); `lk lint --golden` passes the library and fails the broken demo release.
-- **Drift:** a hand rule added to `inbox-triage` was detected (`drift`, closest release named), explained, reverted
-  after a yes, with the hand-made file kept in a backup.
-- **Secrets:** a pasted (fake) token was refused, with no tool call; it is in no file outside the chat history.
-- **Docker setup:** `docker/up.sh` twice in a row exits 0; the second run changes nothing it already did; API key
-  and gateway token values found in 0 files of the state directory.
+- **Unit tests:** `uv run pytest -q` passes (407 tests). A small fake of the OpenClaw CLI covers the commands the
+  toolkit calls.
+- **Interview:** blank answers were found and asked; only the answer cells of the settings file changed.
+- **Update:** from the first release to the second, after a yes: applied with all smoke checks passing, the client's
+  answers kept, the new question asked. Running the same release again changes nothing (checked by command).
+- **Rollback:** an update to the release I broke on purpose failed its checks; the skill files were byte for byte
+  the same afterwards and the host stayed on the previous release.
+- **doctor:** `doctor --lint` passes on the host, with one reviewed exception (below). A host description without that
+  exception made the check fail and the update roll back.
+- **Versions:** pins asking for another Node version were refused before anything was written.
+- **Integration:** the team digest skill stayed off until its channel was connected; then it loaded, and the skill
+  file never changed.
+- **Tenants:** a request for another business was refused and nothing changed.
+- **Approvals:** the agent asked "Shall I?" even after direct instructions; "no" changed nothing; "What changed?" was
+  answered from the record of approvals.
+- **Client data:** a skill asked for with an email address was created with the address as a setting only; the
+  library check passes on my library and fails on the broken release, as CI would.
+- **Drift:** a rule added by hand to a skill was found, shown as a diff, explained, and reverted after a yes, with the
+  hand-made version kept in a backup.
+- **Secrets:** a pasted (fake) token was refused without any tool call and is in no file outside the chat history.
+- **Setup:** `docker/up.sh` twice in a row works and the second run changes nothing new; the key and token values are
+  in no file of the gateway's state.
 
-## What does not work, or was not checked
+## What does not work, or I did not check
 
-Gaps marked **critical** are explicit items of the spec's checklist that are not met as written.
-
-- **Critical: `openclaw doctor --lint --json` exits 1 in Docker.** The only finding is the expected warning that the
-  gateway binds `lan` inside the container (needed for Docker's port publishing; the port is published on host
-  loopback only). `config validate` passes. Not yet decided: accept a reviewed list of known findings, or change the
-  network setup. See `docs/decisions.md`.
-- **Gateway and Node versions are pinned in the Docker image, not checked by the reconciler.** The pins file pins skill
-  revisions only; `reconcile` does not refuse a host running another OpenClaw version.
-- **The reconciler's output is a list of changed paths with before/after hashes**, not a text diff. A text diff of
-  `client-config.md` would print answer values, which reports never contain.
-- **`verify-skills` checks that every managed skill is loaded**, not that the list is "exactly" those: OpenClaw's own
-  bundled skills are present too.
-- **Confirm-before-change is enforced by instructions** (`AGENTS.md`, `SKILL.md`). In this setup the agent can run
-  shell commands without an approval prompt; the record of approvals is written by the toolkit, not by OpenClaw.
-- **Automations** (schedules) are OpenClaw's own: no dry run and no rollback from the toolkit.
-- **No real chat channel or mailbox is connected.** Skills that post or read email are configured, not run.
-- **A secret pasted in chat stays in OpenClaw's conversation history**; the agent asks for it to be replaced.
-- **Rollback covers the skills folder** (and, for integrations, one `skills.entries` block); the snapshot is in
-  memory, so killing the process mid-apply does not roll back.
-- **Only Docker Desktop on WSL2** was used, with one host; no remote host, no tailnet.
-- Format details that come from one sample or from us are listed in `docs/assumptions.md`.
+- **One `doctor` warning is accepted on purpose.** Inside a container the gateway has to listen on all interfaces so
+  Docker can publish the port (I publish it on the host's loopback only), and `doctor` warns about that. The host
+  description lists that one finding as accepted; any other finding fails the check. I would like the operator's view.
+- **The "Shall I?" rule is enforced by instructions**, not by OpenClaw. In this setup the agent can run shell commands
+  without an approval prompt. What the toolkit enforces is that an apply needs an approval text and records it.
+- **Schedules are OpenClaw automations**: the toolkit cannot dry-run or roll them back.
+- **No real chat channel or mailbox is connected**, so skills that post or read email are set up but not run.
+- **A secret pasted in chat stays in OpenClaw's conversation history.** That is why the agent asks for it to be
+  replaced instead of just ignoring it.
+- **The smoke check confirms my skills are loaded**, not that they are the only ones: OpenClaw's own skills are
+  there too.
+- **Rollback covers the skills folder** (and the one config block an integration touches). It is kept in memory, so
+  killing the process in the middle of an apply does not roll back.
+- **One host, Docker Desktop on WSL2 only.** No remote hosts, no tailnet.
+- Formats I had to guess are listed in `docs/assumptions.md`.
 
 ## What I would do next
 
-1. Decide the `doctor --lint` rule with operator and make it a smoke check.
-2. Pin the gateway version in the pins file and refuse a host that runs another one.
-3. A model-free monitor per host (gateway ready, skills loaded, config valid) with an alert path that does not go
-   through the agent (the spec's third problem).
-4. CI on the repository: tests, `lk lint --golden` on the library, a `git grep` for key patterns.
-5. Remote hosts over the tailnet, and an on-disk snapshot so an interrupted apply can still be rolled back.
+1. A model-free monitor per host with its own alert path (the spec's third problem).
+2. CI on the repository: the tests, the library check and a scan for key patterns.
+3. Remote hosts over the tailnet, and a snapshot on disk so an interrupted apply can still roll back.
+4. Pins by git revision as well as content hash.
 
 ## Commands
 
 ```bash
-uv run python -m claw_skills_kit fill SKILL_DIR --answers ANSWERS.json --out OUT.md
-uv run python -m claw_skills_kit lock LIBRARY --skills NAME [NAME ...] --out skills.lock.json
-uv run python -m claw_skills_kit reconcile --host HOST.json --library LIBRARY --target SKILLS_DIR --pins skills.lock.json \
+lk fill SKILL_DIR --answers ANSWERS.json --out OUT.md
+lk lock LIBRARY --skills NAME... --out skills.lock.json [--openclaw VERSION] [--node VERSION]
+lk reconcile --host HOST.json --library LIBRARY --target SKILLS_DIR --pins skills.lock.json [--diff] \
     [--apply [--approval TEXT] [--backup-dir DIR]]
-uv run python -m claw_skills_kit question {add|change|remove} SKILL_DIR --key K [--suggested S] [--answer A] [--apply]
-uv run python -m claw_skills_kit skill create SKILLS_DIR --name N --description D [--question KEY SUGGESTED [ANSWER]]... \
+lk question {add|change|remove} SKILL_DIR --key K [--suggested S] [--answer A] [--apply]
+lk skill create SKILLS_DIR --name N --description D [--question KEY SUGGESTED [ANSWER]]... \
     (--instructions T | --instructions-file F|-) [--apply]
-uv run python -m claw_skills_kit skill remove SKILLS_DIR --name N [--discard-answers] [--apply]
-uv run python -m claw_skills_kit integration {status|enable|disable} SKILLS_DIR --name N [--env VAR=VALUE]... \
-    [--api-key-env VAR] [--apply]
-uv run python -m claw_skills_kit host {show|check-client --name C|releases --releases DIR|verify-skills} --host HOST.json
-uv run python -m claw_skills_kit lint [--golden] SKILL_DIR [...]
-uv run python -m claw_skills_kit history [--limit N]
+lk skill remove SKILLS_DIR --name N [--discard-answers] [--apply]
+lk integration {status|enable|disable} SKILLS_DIR --name N [--env VAR=VALUE]... [--api-key-env VAR] [--apply]
+lk host {show | check-client --name C | releases --releases DIR | verify-skills | doctor} --host HOST.json
+lk lint [--golden] SKILL_DIR...
+lk history [--limit N]
 ```
 
-Anything that writes is a dry run unless `--apply` is given. With `CSK_EVIDENCE` set, `--apply` also needs
-`--approval`, recorded before the change. Reports carry paths, hashes, keys and variable names, never answer values
-or secrets.
+`lk` is `uv run python -m claw_skills_kit` (or `skills/skill-manager/scripts/lk`). Anything that writes is a dry run
+unless `--apply` is given. Where approvals are recorded, `--apply` also needs `--approval`. Reports carry paths,
+hashes, keys and variable names, never answer values or secrets.
 
 | Exit | Meaning |
 |---|---|
-| 0 | ok: read `status` (`planned`, `applied`, `unchanged`, ...) |
+| 0 | ok (read `status`: planned, applied, unchanged, ...) |
 | 1 | unexpected error |
 | 2 | usage error |
 | 3 | invalid template |
 | 4 | invalid answers file |
-| 5 | missing required answers (`fill`) |
-| 6 | check failed, host restored and verified (`rolled_back`) |
-| 7 | restore failed, `unrestored` lists the paths |
-| 8 | more than one tenant on a gateway (`tenant_conflict`) |
-| 9 | pin missing or not matching the library |
-| 10 | invalid input, including `approval_required`, `approval_has_client_data`, `approval_has_answer_value` |
-| 11 | skill missing or invalid, including `client_data_in_skill`, `skills_not_loaded`, `lint_failed` |
-| 12 | existing `client-config.md` unreadable (left untouched) |
+| 5 | missing required answers |
+| 6 | a check failed, the host was restored and verified |
+| 7 | restore failed (`unrestored` lists the paths) |
+| 8 | more than one tenant on a gateway |
+| 9 | a pin is missing or does not match (skills, OpenClaw or Node version) |
+| 10 | invalid input, including a missing or unsafe approval |
+| 11 | skill missing or invalid, including client data in a skill and skills not loaded |
+| 12 | the existing settings file cannot be read (left untouched) |
 | 13 | question refused |
-| 14 | an answer would be lost (`--discard-answer(s)` needed, after asking the client) |
-| 15 | integration refused (undeclared variable, a value that looks like a secret, a key given as a value) |
+| 14 | an answer would be lost (the client has to agree first) |
+| 15 | integration refused |
+| 16 | a host check failed (`doctor` findings) |
 
 ## Layout
 
 ```
-src/claw_skills_kit/      cli.py (commands, exit codes), template_format.py (the only module that knows the Markdown
-                     layout), interview.py, questions.py, skills.py, reconcile.py + reconciler/ (hashing, host,
-                     descriptor, smoke, lockfile), integrations.py, layer1.py, evidence.py
-skills/skill-manager SKILL.md the agent reads, scripts/lk wrapper
-library/releases/    the sample golden library: one folder per release (skills, skills.lock.json, RELEASE.md)
-library/demo-releases/  2026.11.25, broken on purpose (BROKEN_ON_PURPOSE.md); only in the image on request
-host/AGENTS.csk.md   rules block placed at the top of the workspace AGENTS.md
-docker/              Dockerfile, compose.yml, up.sh, bootstrap.sh, apply_agents_rules.py
-docs/                decisions.md, assumptions.md, spec-answers.md
-tests/               one file per module, plus fake_openclaw.py
+src/claw_skills_kit/        the toolkit (cli.py has the commands and exit codes)
+skills/skill-manager/  the skill the agent reads, and its lk wrapper
+library/releases/      my sample skill library, one folder per release
+library/demo-releases/ a release broken on purpose, only added on request
+host/AGENTS.csk.md  the rules placed at the top of the workspace AGENTS.md
+docker/                image, compose file, up.sh, bootstrap
+docs/                  decisions.md, assumptions.md, spec-answers.md
+tests/
 ```
