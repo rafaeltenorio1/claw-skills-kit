@@ -34,5 +34,7 @@ RUN chmod 0755 /opt/claw-skills-kit/bootstrap.sh /opt/claw-skills-kit/skill-mana
 # skill-manager's `lk` uses this interpreter when it is set (no repository checkout in the container).
 ENV CSK_PYTHON=/opt/claw-skills-kit/venv/bin/python \
     CSK_RELEASES=/opt/claw-skills-kit/library/releases \
-    CSK_HOST=/home/node/.openclaw/csk/host.json
+    CSK_HOST=/home/node/.openclaw/csk/host.json \
+    CSK_EVIDENCE=/home/node/.openclaw/csk/evidence.jsonl \
+    CSK_BACKUPS=/home/node/.openclaw/csk/backups
 USER node

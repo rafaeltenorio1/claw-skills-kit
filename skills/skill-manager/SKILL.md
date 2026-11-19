@@ -19,6 +19,10 @@ Talk to the client in their language, in plain words. Never show file names, key
 `{baseDir}/scripts/lk`, with `SKILLS={baseDir}/..` (the folder that holds every skill). Every call prints one JSON
 line. Without `--apply` it is a dry run that changes nothing.
 
+Every `--apply` also takes `--approval "<the question the client said yes to>"`: your own proposal, in plain words,
+without the client's answer values, contact details, IDs or secrets (for a settings answer: "Save your answer to:
+<the question>"). This host records it before the change; without it the tool refuses (`approval_required`).
+
 Run every `lk` call in the foreground and wait for its JSON: call exec with `yieldMs: 120000`. Some calls (an update,
 connecting an integration) run checks for more than 10 seconds, and exec's default would move them to the
 background; what you tell the client must come from the finished result, in the same turn.
@@ -33,6 +37,7 @@ background; what you tell the client must come from the finished result, in the 
 | This assistant's client | `lk host show --host "$CSK_HOST"` |
 | Another person or business? | `lk host check-client --host "$CSK_HOST" --name "<who the request is for>"` |
 | Release now / next | `lk host releases --host "$CSK_HOST" --releases "$CSK_RELEASES"` |
+| What changed so far | `lk history --limit 20` |
 | Integration status | `lk integration status $SKILLS --name <skill>` |
 | Connect an integration | `lk integration enable $SKILLS --name <skill> [--env VAR="<value>"] [--api-key-env VAR]` |
 | Disconnect it | `lk integration disable $SKILLS --name <skill>` |
@@ -51,6 +56,11 @@ line without quotes.
      and the questions it needs to do the job well, all in the same `skill create` call: one
      `--question <key> "<hint>" ["<value>"]` each (value only if the client gave it). Never create the skill first
      and add its questions with `question add` afterwards: the dry run could not check them.
+   - Keep the skill generic. Anything that belongs to this client (an email address, a phone number, a channel,
+     a chat or document ID or link, a name of a person or company, a secret) never goes in the instructions or the
+     description: make it a `--question` with the client's value as the answer, and write the instructions as
+     "send it to the recipient in client-config.md". The tool refuses client data in a skill
+     (`client_data_in_skill`); if it does, move what it found into questions and try the dry run again.
    - Ask for any answer you need; never invent the client's answers. A suggestion is fine.
 3. **Propose and ask.** Say what will change in one or two plain sentences and ask yes or no.
    Example: "Today the cleaning runs every day at 8:00. Should it run every 7 days at 8:00 instead?"
@@ -84,8 +94,8 @@ When the client asks if there are updates, or asks to update:
 1. **Find the next release.** `lk host releases --host "$CSK_HOST" --releases "$CSK_RELEASES"`. Updates go one
    release at a time, from the one this assistant runs (`current`) to the one after it (`next`).
    - `next` is null: say in one sentence that everything is up to date. Stop.
-   - `status: drift` (`current` is null): this assistant's operator skills match no operator release; someone changed
-     them by hand. Say so in plain words, apply nothing, and say that operator needs to look at it. Stop.
+   - `status: drift` (`current` is null): someone changed operator skills on this assistant by hand, outside any
+     release. Do not update; follow "Hand-made changes" below.
 2. **Dry run that release.** `REL="$CSK_RELEASES/<next>"`, then
    `lk reconcile --host "$CSK_HOST" --library "$REL/skills" --target $SKILLS --pins "$REL/skills.lock.json"`.
 3. **`planned`**: read `$REL/RELEASE.md` and, for each skill in `changes`, its `lineage.md` in `$REL/skills/`.
@@ -142,6 +152,31 @@ Connecting it changes only this gateway's settings, never the skill.
    nothing changed. A refusal (exit 11 or 15): explain in one sentence and stop.
 5. **Disconnecting** is the same flow: propose, yes, `lk integration disable --apply`; say the skill stops working
    until it is connected again.
+
+## Hand-made changes (adopting a drifted assistant)
+
+`lk host releases` says `drift` when this assistant's operator skills match no release: someone edited them by hand.
+`closest` is the release nearest to what is installed and `drifted` lists the skills that differ from it.
+
+1. Dry run against the closest release: `REL="$CSK_RELEASES/<closest>"`, then the same `lk reconcile` as an
+   update. Its `changes` are the files that would be replaced.
+2. Read the hand-made version of each drifted skill's `SKILL.md` and compare it with `$REL/skills/<skill>/SKILL.md`
+   to understand the change (for example an extra rule). Tell the client in plain words: which skills were changed
+   by hand and what the change does, that bringing them back to the operator's version keeps all their answers and their
+   own questions, that a copy of the hand-made version is kept, and that a quick check runs and everything is put
+   back if it fails. Ask yes or no.
+3. After a clear yes: the same command with `--apply --backup-dir "$CSK_BACKUPS"` and `--approval`.
+4. If the hand-made change was a rule for this client (a recipient, a channel, a business rule), offer to keep it
+   the right way: as a setting of that skill (`lk question add`, key starting with what it changes), never in the
+   skill's text. Contact details and IDs belong in the client's settings only.
+5. After that, updates work again (operator skill updates above).
+
+## What changed (the record of approvals)
+
+Each change made with `--apply` is recorded on this host: when, what, the question the client approved, and the
+result. When the client asks what was changed, by whom or when, run `lk history` and answer from it in plain words:
+the date in the client's time zone, what changed, that they approved it, and whether it went in (`applied`), was
+undone (`rolled_back`) or was refused. Never show ids, file names, hashes or commands.
 
 ## Schedules (a skill that must run by itself)
 

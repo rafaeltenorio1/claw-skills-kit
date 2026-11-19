@@ -2,6 +2,7 @@
 # Build, configure and start the operator OpenClaw gateway in Docker. Safe to run again.
 #   docker/up.sh                          build + bootstrap + start + checks
 #   CSK_DEMO_ROLLBACK=1 docker/up.sh   same, with the release that is broken on purpose (rollback demo)
+#   CSK_DEMO_DRIFT=1 docker/up.sh      same, and an installed skill is edited by hand (drift demo)
 # Env: CSK_ENV_FILE (secrets file), CSK_HOST_PORT (default 18790), CSK_DEMO_ROLLBACK (default 0).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -12,6 +13,9 @@ if [ "${CSK_DEMO_ROLLBACK:-0}" = "1" ]; then
     say "rollback demo: ON (the library includes a release that is broken on purpose)"
 else
     say "rollback demo: off (set CSK_DEMO_ROLLBACK=1 to turn it on)"
+fi
+if [ "${CSK_DEMO_DRIFT:-0}" = "1" ]; then
+    say "drift demo: ON (bootstrap edits an installed operator skill by hand)"
 fi
 say "building image"
 docker compose build --quiet gateway

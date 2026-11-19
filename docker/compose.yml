@@ -18,6 +18,7 @@ services:
         required: true
     environment:
       CSK_HOST_PORT: ${CSK_HOST_PORT:-18790}
+      CSK_DEMO_DRIFT: ${CSK_DEMO_DRIFT:-0}  # 1 = bootstrap edits a operator skill by hand (drift demo)
       TZ: America/Sao_Paulo
       OPENCLAW_DISABLE_BONJOUR: "1"
     ports:

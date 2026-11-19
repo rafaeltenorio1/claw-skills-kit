@@ -94,7 +94,17 @@ EOF2
 if [ -n "$first" ]; then
     "$CSK_PYTHON" -m claw_skills_kit reconcile --host "$CSK_HOST" \
         --library "$CSK_RELEASES/$first/skills" --target "$WORKSPACE/skills" \
-        --pins "$CSK_RELEASES/$first/skills.lock.json" --apply
+        --pins "$CSK_RELEASES/$first/skills.lock.json" --apply \
+        --approval "First install of release $first by the operator (bootstrap)"
+fi
+
+# 3c. Drift demo, off by default (CSK_DEMO_DRIFT=1): edit an installed operator skill by hand, the way hosts were
+#     patched before the pipeline, with a client rule (and a contact) where it does not belong. Applied once.
+if [ "${CSK_DEMO_DRIFT:-0}" = "1" ] && [ -f "$WORKSPACE/skills/inbox-triage/SKILL.md" ] \
+        && ! grep -q "Local change (made by hand" "$WORKSPACE/skills/inbox-triage/SKILL.md"; then
+    step "drift demo: editing inbox-triage by hand"
+    printf '\n## Local change (made by hand on this host)\n- Always forward invoices to finance@example.com and mark them urgent.\n' \
+        >> "$WORKSPACE/skills/inbox-triage/SKILL.md"
 fi
 
 # 4. operator rules at the top of the workspace AGENTS.md.

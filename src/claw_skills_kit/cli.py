@@ -4,6 +4,7 @@ import sys
 import traceback
 from pathlib import Path
 
+from claw_skills_kit.evidence import evidence_path, history, record_approval, record_result
 from claw_skills_kit.skills import NewQuestion, SkillError, apply_plan, plan_create, plan_remove
 from claw_skills_kit.questions import QuestionError, add_question, change_question, remove_question
 from claw_skills_kit.interview import InterviewError, apply_answers, load_answers, missing_required
@@ -62,6 +63,7 @@ _SKILL_CODES = {
     "skill_exists": EXIT_SKILL,
     "skill_not_found": EXIT_SKILL,
     "golden_skill": EXIT_SKILL,
+    "client_data_in_skill": EXIT_SKILL,
     "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
     "rolled_back": EXIT_ROLLED_BACK,
     "rollback_failed": EXIT_ROLLBACK_FAILED,
@@ -135,8 +137,13 @@ def _build_parser() -> argparse.ArgumentParser:
     rec_parser.add_argument("--target", type=Path, required=True, help="The host's skills folder.")
     rec_parser.add_argument("--pins", type=Path, required=True, help="Pins file (skills.lock.json).")
     rec_parser.add_argument(
+        "--backup-dir", type=Path,
+        help="With --apply: first copy every file that will be replaced or deleted to BACKUP_DIR/<UTC time>/.",
+    )
+    rec_parser.add_argument(
         "--apply", action="store_true", help="Write the changes. Without it nothing is touched."
     )
+    _add_approval(rec_parser)
 
     q_parser = subparsers.add_parser(
         "question",
@@ -159,6 +166,7 @@ def _build_parser() -> argparse.ArgumentParser:
                 "--discard-answer", action="store_true", help="Allow removing a question that has an answer."
             )
         a.add_argument("--apply", action="store_true", help="Write the change. Without it nothing is touched.")
+        _add_approval(a)
 
     s_parser = subparsers.add_parser(
         "skill", help="Create or remove a skill on one client's instance (dry run unless --apply)."
@@ -178,6 +186,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="A settings question written with the skill: KEY SUGGESTED [ANSWER]. Repeat for each question.",
     )
     create.add_argument("--apply", action="store_true", help="Write the skill. Without it nothing is touched.")
+    _add_approval(create)
     remove = s_sub.add_parser("remove", help="Remove a skill that was created on this instance.")
     remove.add_argument("skills_dir", type=Path, help="The instance's skills folder.")
     remove.add_argument("--name", required=True)
@@ -185,6 +194,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--discard-answers", action="store_true", help="Allow removing a skill whose questions have answers."
     )
     remove.add_argument("--apply", action="store_true", help="Delete the skill. Without it nothing is touched.")
+    _add_approval(remove)
+
+    hist = subparsers.add_parser("history", help="Changes recorded on this host, newest first (CSK_EVIDENCE).")
+    hist.add_argument("--limit", type=int, default=20, help="How many changes to show (default 20).")
+    hist.add_argument("--evidence", type=Path, help="Evidence file; defaults to $CSK_EVIDENCE.")
+
+    lint_parser = subparsers.add_parser(
+        "lint",
+        help="Library check: no client specifics in Layer 1, required files present (exit 11 on findings).",
+    )
+    lint_parser.add_argument("skill_dirs", nargs="+", type=Path, help="Skill folders to check.")
+    lint_parser.add_argument(
+        "--golden", action="store_true",
+        help="Golden skills: also require client-config.template.md, interview.md (1-3 questions), lineage.md.",
+    )
 
     h_parser = subparsers.add_parser("host", help="Read this host's descriptor (read-only).")
     h_sub = h_parser.add_subparsers(dest="action", required=True)
@@ -232,19 +256,85 @@ def _build_parser() -> argparse.ArgumentParser:
             )
         if action != "status":
             p.add_argument("--apply", action="store_true", help="Change the config. Without it nothing is touched.")
+            _add_approval(p)
     return parser
 
 
+_LAST_PAYLOAD: dict[str, object] | None = None
+
+
 def _emit(payload: dict[str, object]) -> None:
+    global _LAST_PAYLOAD
+    _LAST_PAYLOAD = payload
     print(json.dumps(payload, ensure_ascii=False))
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the command and return the exit code. Never calls sys.exit itself."""
+    """Run the command and return the exit code. Never calls sys.exit itself.
+
+    With CSK_EVIDENCE set, an applying command (--apply) needs --approval: the approval is recorded before the
+    command runs and its outcome after, whatever the outcome (see evidence.py).
+    """
+    global _LAST_PAYLOAD
     parser = _build_parser()
     args = parser.parse_args(argv)
-
+    _LAST_PAYLOAD = None
+    record_id, path = None, None
     try:
+        if getattr(args, "apply", False):
+            record_id, path = _record_approval(args)
+    except _Refusal as refusal:
+        _emit({"ok": False, "status": refusal.status, **refusal.details})
+        return refusal.code
+    code = _dispatch(parser, args)
+    if record_id is not None:
+        record_result(path, record_id, _LAST_PAYLOAD, code)
+    return code
+
+
+def _add_approval(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--approval", metavar="TEXT",
+        help="The question the client said yes to, in plain words (no answer values). "
+             "Required with --apply when CSK_EVIDENCE is set; recorded before the change.",
+    )
+
+
+def _target_of(args: argparse.Namespace) -> str:
+    if args.command == "reconcile":
+        return str(args.library)
+    for name in ("skill_dir", "skills_dir"):
+        if getattr(args, name, None) is not None:
+            value = str(getattr(args, name))
+            return f"{value}/{args.name}" if getattr(args, "name", None) else value
+    return ""
+
+
+def _record_approval(args: argparse.Namespace):
+    from claw_skills_kit.layer1 import find_client_specifics
+
+    path = evidence_path()
+    if path is None:
+        return None, None
+    approval = (args.approval or "").strip()
+    if not approval:
+        raise _Refusal("approval_required", EXIT_INVALID_INPUT,
+                       error="This host records approvals: pass --approval with the question the client said yes to.")
+    if "\n" in approval or len(approval) > 300:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="--approval must be one line of at most 300 characters.")
+    if find_client_specifics(approval):
+        raise _Refusal("approval_has_client_data", EXIT_INVALID_INPUT,
+                       error="Write the approval without contact details, IDs, links or secrets.")
+    try:
+        return record_approval(path, args.command, getattr(args, "action", None), _target_of(args), approval), path
+    except OSError as exc:
+        raise _Refusal("evidence_unwritable", EXIT_INVALID_INPUT, error=f"Cannot record the approval: {exc}") from None
+
+
+def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    try:
+        if args.command == "history":
+            return _run_history(args)
         if args.command == "fill":
             return _run_fill(parser, args.skill_dir, args.answers, args.out)
         if args.command == "lock":
@@ -254,11 +344,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "question":
             return _run_question(args)
         if args.command == "reconcile":
-            return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply)
+            return _run_reconcile(args.host, args.library, args.target, args.pins, args.apply, args.backup_dir)
         if args.command == "integration":
             return _run_integration(args)
         if args.command == "host":
             return _run_host(args)
+        if args.command == "lint":
+            return _run_lint(args.skill_dirs, args.golden)
         parser.error(f"Unknown command: {args.command}")
     except _Refusal as refusal:
         _emit({"ok": False, "status": refusal.status, **refusal.details})
@@ -369,7 +461,9 @@ def _run_lock(library: Path, skills: list[str], out_path: Path) -> int:
     return EXIT_OK
 
 
-def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path, apply: bool) -> int:
+def _run_reconcile(
+    host_path: Path, library: Path, target: Path, pins_path: Path, apply: bool, backup_dir: Path | None = None
+) -> int:
     descriptor_text = _read_utf8(host_path, "invalid_descriptor", EXIT_INVALID_INPUT, "host descriptor")
     try:
         descriptor = load_descriptor(descriptor_text)
@@ -391,7 +485,12 @@ def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path
             for argv in descriptor.smoke.commands
         ]
 
+    backup: dict[str, object] = {}
     try:
+        if apply and backup_dir is not None:
+            backup = _backup_before_apply(
+                reconcile(descriptor, LocalHost(library), LocalHost(target), pins, apply=False), target, backup_dir
+            )
         report = reconcile(
             descriptor, LocalHost(library), LocalHost(target), pins, apply=apply, extra_checks=smoke_commands
         )
@@ -399,7 +498,7 @@ def _run_reconcile(host_path: Path, library: Path, target: Path, pins_path: Path
         raise _refuse(exc) from None
 
     code = {"rolled_back": EXIT_ROLLED_BACK, "rollback_failed": EXIT_ROLLBACK_FAILED}.get(report.status, EXIT_OK)
-    _emit({"ok": code == EXIT_OK, **report.to_dict()})
+    _emit({"ok": code == EXIT_OK, **report.to_dict(), **backup})
     return code
 
 
@@ -462,7 +561,10 @@ def _run_skill(args: argparse.Namespace) -> int:
         if args.apply:
             apply_plan(skills, plan)
     except SkillError as exc:
-        raise _Refusal(exc.status, _SKILL_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
+        details: dict[str, object] = {"error": str(exc)}
+        if exc.findings:
+            details["findings"] = list(exc.findings)  # kind and line only, never the text found
+        raise _Refusal(exc.status, _SKILL_CODES.get(exc.status, EXIT_UNEXPECTED), **details) from None
     except QuestionError as exc:
         raise _Refusal(exc.status, _QUESTION_CODES.get(exc.status, EXIT_UNEXPECTED), error=str(exc)) from None
 
@@ -610,21 +712,73 @@ def _releases(descriptor, base: dict[str, object], releases: Path) -> int:
     _require_dir(Path(descriptor.skills_dir), "skills folder")
     names = sorted(p.name for p in releases.iterdir() if (p / "skills.lock.json").is_file())
     target = LocalHost(Path(descriptor.skills_dir))
-    try:
-        installed = compute_revisions(target, descriptor.skills)
-    except ReconcileError:
-        installed = None  # a managed skill is missing on the host: drift
-    current = None
+    installed: dict[str, str | None] = {}
+    for skill in descriptor.skills:
+        try:
+            installed[skill] = compute_revisions(target, [skill])[skill]
+        except ReconcileError:
+            installed[skill] = None  # missing on the host
+    current, closest, best = None, None, -1
     for name in names:
         try:
             pins = load_pins((releases / name / "skills.lock.json").read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, LockfileError) as exc:
             raise _Refusal("invalid_pins", EXIT_INVALID_INPUT, error=f"{name}: {exc}") from None
-        if installed is not None and all(pins.get(s) == installed[s] for s in descriptor.skills):
+        matching = [s for s in descriptor.skills if installed[s] is not None and pins.get(s) == installed[s]]
+        if len(matching) == len(descriptor.skills):
             current = name
+        if len(matching) >= best:  # ties go to the newer release
+            closest, best = name, len(matching)
+            drifted = [s for s in descriptor.skills if s not in matching]
     later = names[names.index(current) + 1:] if current else []
-    _emit({
+    payload: dict[str, object] = {
         "ok": True, "status": "ok" if current else "drift", **base, "current": current,
         "next": later[0] if later else None, "newer": later, "releases": names,
-    })
+    }
+    if current is None and closest is not None:
+        # drift: the release nearest to the host, and the skills that differ from it (changed by hand or missing)
+        payload.update(closest=closest, drifted=drifted)
+    _emit(payload)
     return EXIT_OK
+
+
+def _run_lint(folders: list[Path], golden: bool) -> int:
+    from claw_skills_kit.layer1 import lint_skill
+
+    results: dict[str, list[dict[str, object]]] = {}
+    for folder in folders:
+        _require_dir(folder, "skill folder")
+        results[folder.name] = [f.to_dict() for f in lint_skill(folder, golden=golden)]
+    failed = {name: found for name, found in results.items() if found}
+    # kinds and lines only, never the text found
+    _emit({"ok": not failed, "status": "lint_failed" if failed else "ok", "skills": results})
+    return EXIT_SKILL if failed else EXIT_OK
+
+
+def _run_history(args: argparse.Namespace) -> int:
+    path = args.evidence or evidence_path()
+    if path is None:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="No evidence file: set CSK_EVIDENCE or pass --evidence.")
+    if args.limit < 1:
+        raise _Refusal("invalid_input", EXIT_INVALID_INPUT, error="--limit must be at least 1.")
+    entries = history(path, args.limit)
+    _emit({"ok": True, "status": "ok", "count": len(entries), "changes": entries})
+    return EXIT_OK
+
+
+def _backup_before_apply(plan, target: Path, backup_dir: Path) -> dict[str, object]:
+    """Copy the files a reconcile will replace or delete, so hand edits on a drifted host are never lost."""
+    import shutil
+    from datetime import datetime, timezone
+
+    paths = [c.path for c in plan.changes if c.action in ("update", "delete") and (target / c.path).is_file()]
+    if not paths:
+        return {}
+    folder = backup_dir / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    try:
+        for rel in paths:
+            (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target / rel, folder / rel)
+    except OSError as exc:
+        raise _Refusal("backup_failed", EXIT_INVALID_INPUT, error=f"Nothing was changed; backup failed: {exc}") from None
+    return {"backup": str(folder), "backed_up": sorted(paths)}

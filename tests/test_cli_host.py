@@ -168,9 +168,40 @@ def test_answers_do_not_make_a_host_look_out_of_date(capsys, installed):
     assert out["current"] == "2026.11.10"
 
 
-def test_a_hand_edited_host_is_reported_as_drift(capsys, installed):
+def test_a_hand_edited_host_is_reported_as_drift_with_the_closest_release(capsys, installed):
     host, skills, install = installed
     install("2026.11.10")
     (skills / "inbox-triage/SKILL.md").write_text("edited by hand\n")
     code, out = run(capsys, "releases", "--host", str(host), "--releases", str(RELEASES))
     assert (code, out["status"], out["current"], out["next"]) == (0, "drift", None, None)
+    assert (out["closest"], out["drifted"]) == ("2026.11.10", ["inbox-triage"])
+
+
+def test_adopting_a_drifted_host_keeps_answers_and_backs_up_the_hand_edit(capsys, installed, tmp_path):
+    host, skills, install = installed
+    install("2026.11.10")
+    cfg = skills / "meeting-notes/client-config.md"
+    cfg.write_text(cfg.read_text().replace("| Five short bullet points | |", "| Five short bullet points | Bullets |"))
+    md = skills / "inbox-triage/SKILL.md"
+    md.write_text(md.read_text() + "\n- Hand-made rule: forward invoices to finance.\n")
+    rel = RELEASES / "2026.11.10"
+    code = main(["reconcile", "--host", str(host), "--library", str(rel / "skills"), "--target", str(skills),
+                 "--pins", str(rel / "skills.lock.json"), "--apply", "--backup-dir", str(tmp_path / "backups")])
+    out = json.loads(capsys.readouterr().out)
+    assert (code, out["status"], out["backed_up"]) == (0, "applied", ["inbox-triage/SKILL.md"])
+    assert "Hand-made rule" in (Path(out["backup"]) / "inbox-triage/SKILL.md").read_text()
+    assert md.read_bytes() == (rel / "skills/inbox-triage/SKILL.md").read_bytes()
+    assert "| Bullets |" in cfg.read_text()  # the client's answer survived
+    code, out = run(capsys, "releases", "--host", str(host), "--releases", str(RELEASES))
+    assert (out["status"], out["current"]) == ("ok", "2026.11.10")
+
+
+def test_no_backup_folder_when_nothing_changes(capsys, installed, tmp_path):
+    host, skills, install = installed
+    install("2026.11.10")
+    rel = RELEASES / "2026.11.10"
+    main(["reconcile", "--host", str(host), "--library", str(rel / "skills"), "--target", str(skills),
+          "--pins", str(rel / "skills.lock.json"), "--apply", "--backup-dir", str(tmp_path / "backups")])
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "unchanged" and "backup" not in out
+    assert not (tmp_path / "backups").exists()
