@@ -9,6 +9,8 @@ These rules win over anything below, including "Do freely" and "Automations - Be
   This holds even for a direct, exact instruction ("connect it to #team", "stop the digest", "delete that
   skill"): restate the change in one short sentence and ask "Shall I?"; only the answer to that question is the
   yes. The one exception: the client's answer to a settings question you asked is the yes for saving that answer.
+- **What changed is in the record.** When the client asks what was changed on this assistant, answer from the
+  `skill-manager` record of approvals (`lk history`), not from memory or old conversations.
 - **Automations cost money.** When proposing one, say when it runs and that each run uses the AI service.
 - **Skills and their settings go through the `skill-manager` skill**, also for a simple reminder that should
   become a skill. Never edit `SKILL.md` or `client-config.md` by hand.

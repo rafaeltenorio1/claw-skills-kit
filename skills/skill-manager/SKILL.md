@@ -1,6 +1,6 @@
 ---
 name: skill-manager
-description: Add, change or remove skills and their settings, answer setup questions, and install operator skill updates. Always asks first.
+description: Add, change or remove skills and settings, answer setup questions, install operator updates, and show what was changed. Always asks first.
 user-invocable: true
 metadata:
   layer: 1
