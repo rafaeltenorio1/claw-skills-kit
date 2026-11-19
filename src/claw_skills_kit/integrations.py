@@ -223,14 +223,54 @@ class OpenClaw:
     def validate(self) -> bool:
         return self._call("config", "validate").returncode == 0
 
-    def skill_ready(self, skill: str) -> bool:
+    def _skills_check(self) -> dict:
         done = self._call("skills", "check", "--json")
         try:
             data = json.loads(done.stdout)
         except json.JSONDecodeError:
             raise IntegrationError("openclaw_failed", "openclaw skills check did not return JSON.") from None
-        eligible = data.get("eligible") or []
-        return any(x == skill or (isinstance(x, dict) and x.get("name") == skill) for x in eligible)
+        if not isinstance(data, dict):
+            raise IntegrationError("openclaw_failed", "openclaw skills check returned an unexpected shape.")
+        return data
+
+    @staticmethod
+    def _names(items: object) -> set[str]:
+        if not isinstance(items, list):
+            return set()
+        return {x if isinstance(x, str) else x.get("name") for x in items if isinstance(x, (str, dict))} - {None}
+
+    def skill_ready(self, skill: str) -> bool:
+        return skill in self._names(self._skills_check().get("eligible"))
+
+    def rescan_skills(self, config_file: Path) -> None:
+        """Make the Gateway rediscover skills now, then put `skills.load.watch` back as it was.
+
+        Observed on 2026.11.3: skill files changed on disk show up in `skills check` only after the watcher's next
+        pass (up to about a minute), and a config write that changes nothing ("No change") does not rescan. A real
+        change to a skills setting does. So the watch flag is flipped and restored: two real changes, one rescan,
+        and the config ends as it started (an absent key is removed again).
+        """
+        try:
+            data = json.loads(config_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise IntegrationError("config_unreadable", f"Cannot read the gateway config: {type(exc).__name__}") from None
+        load = ((data.get("skills") or {}).get("load") or {})
+        original = load.get("watch")
+        path = "skills.load.watch"
+        steps = [self._call("config", "set", "--batch-json", json.dumps([{"path": path, "value": original is False}]))]
+        if original is None:
+            steps.append(self._call("config", "unset", path))
+        else:
+            steps.append(self._call("config", "set", "--batch-json", json.dumps([{"path": path, "value": original}])))
+        if any(done.returncode != 0 for done in steps):
+            raise IntegrationError("openclaw_failed", "openclaw could not refresh the skill list.")
+
+    def skill_inventory(self) -> set[str]:
+        """Every skill OpenClaw discovered, whatever its state (each list in `skills check --json`)."""
+        names: set[str] = set()
+        for value in self._skills_check().values():
+            names |= self._names(value)
+        return names
 
 
 def read_entry(config_file: Path, skill: str) -> dict | None:

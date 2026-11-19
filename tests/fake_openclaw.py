@@ -25,6 +25,19 @@ def save(state, data):
     (state / "openclaw.json").write_text(json.dumps(data, indent=2))
 
 
+def readable(text, name):
+    """A rough stand-in for OpenClaw's frontmatter parser: name matches, description present, brackets closed."""
+    lines = text.splitlines()
+    if not lines or lines[0] != "---" or "---" not in lines[1:]:
+        return False
+    front = lines[1:lines.index("---", 1)]
+    fields = dict(line.split(":", 1) for line in front if ":" in line and not line.startswith(" "))
+    description = fields.get("description", "").strip()
+    if fields.get("name", "").strip() != name or not description:
+        return False
+    return not (description.startswith("[") and not description.endswith("]"))
+
+
 def main(argv):
     state, args = Path(argv[0]), argv[1:]
     data = load(state)
@@ -52,9 +65,11 @@ def main(argv):
         return 1 if (state / "invalid").exists() else 0
     if args[:3] == ["skills", "check", "--json"]:
         entries = (data.get("skills") or {}).get("entries") or {}
-        eligible, missing = [], []
+        eligible, missing, disabled = [], [], []
         for skill_md in sorted((state / "skills").glob("*/SKILL.md")):
             name = skill_md.parent.name
+            if not readable(skill_md.read_text(), name):
+                continue  # like the real one: a skill it cannot read is not in the inventory at all
             req = read_requirements(skill_md.read_text())
             entry = entries.get(name) or {}
             have = set(os.environ) | set(entry.get("env") or {})
@@ -62,12 +77,13 @@ def main(argv):
                 have.add(req.primary_env)
             lacking = [n for n in req.env if n not in have]
             if entry.get("enabled") is False:
-                continue  # listed as disabled by the real openclaw, never eligible
+                disabled.append(name)  # the real openclaw lists it as disabled, never eligible
+                continue
             if lacking or (state / "never_ready").exists():
                 missing.append({"name": name, "missing": {"env": lacking}})
             else:
                 eligible.append(name)
-        print(json.dumps({"eligible": eligible, "missingRequirements": missing}))
+        print(json.dumps({"eligible": eligible, "missingRequirements": missing, "disabled": disabled}))
         return 0
     print(f"fake openclaw: unsupported {args}", file=sys.stderr)
     return 2

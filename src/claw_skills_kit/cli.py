@@ -196,6 +196,17 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
     check.add_argument("--name", required=True, help="The client the request is for.")
+    rel = h_sub.add_parser(
+        "releases",
+        help="Which library release this host runs now, and the next one to install (read-only).",
+    )
+    rel.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
+    rel.add_argument("--releases", required=True, type=Path, help="Folder with one sub-folder per release.")
+    verify = h_sub.add_parser(
+        "verify-skills",
+        help="Smoke check: OpenClaw finds every operator skill of this host (exit 11 lists the missing ones).",
+    )
+    verify.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
 
     i_parser = subparsers.add_parser(
         "integration",
@@ -540,6 +551,10 @@ def _run_host(args: argparse.Namespace) -> int:
         raise _Refusal("invalid_descriptor", EXIT_INVALID_INPUT, error=str(exc)) from None
 
     base = {"host_id": descriptor.host_id, "client": descriptor.clients[0]}
+    if args.action == "verify-skills":
+        return _verify_skills(descriptor, base)
+    if args.action == "releases":
+        return _releases(descriptor, base, args.releases)
     if args.action == "show":
         _emit({"ok": True, "status": "ok", **base, "skills": list(descriptor.skills)})
         return EXIT_OK
@@ -558,3 +573,58 @@ def _run_host(args: argparse.Namespace) -> int:
             error="This gateway already serves one client; another client needs its own gateway.",
         ) from None
     raise AssertionError("the tenant check accepted a second client")  # a bug: reported as unexpected_error
+
+
+def _verify_skills(descriptor, base: dict[str, object]) -> int:
+    """Every skill the descriptor manages must be in OpenClaw's inventory (`skills check --json`).
+
+    Present in any state counts: ready, disabled, or waiting for an integration. A skill OpenClaw could not read
+    (for example a broken SKILL.md frontmatter) is absent from the inventory, while `skills list` and
+    `config validate` still exit 0 (observed on 2026.11.3), so this is the check that catches it.
+    """
+    from claw_skills_kit import integrations as ig
+
+    try:
+        openclaw = ig.OpenClaw()
+        openclaw.rescan_skills(openclaw.config_file())  # otherwise the inventory can be a minute old
+        inventory = openclaw.skill_inventory()
+    except ig.IntegrationError as exc:
+        raise _Refusal("openclaw_failed", EXIT_UNEXPECTED, error=str(exc)) from None
+    missing = sorted(s for s in descriptor.skills if s not in inventory)
+    if missing:
+        raise _Refusal(
+            "skills_not_loaded", EXIT_SKILL, **base, missing=missing,
+            error="OpenClaw does not find these skills; their files may be broken.",
+        )
+    _emit({"ok": True, "status": "ok", **base, "skills": list(descriptor.skills)})
+    return EXIT_OK
+
+
+def _releases(descriptor, base: dict[str, object], releases: Path) -> int:
+    """current = the release whose pins equal the installed skills' revisions; next = the release after it.
+
+    Revisions ignore client-config.md, so the client's answers and instance-only questions never make a host look
+    out of date. A host that matches no release has drifted: `current` is null and nothing should be applied.
+    """
+    _require_dir(releases, "releases folder")
+    _require_dir(Path(descriptor.skills_dir), "skills folder")
+    names = sorted(p.name for p in releases.iterdir() if (p / "skills.lock.json").is_file())
+    target = LocalHost(Path(descriptor.skills_dir))
+    try:
+        installed = compute_revisions(target, descriptor.skills)
+    except ReconcileError:
+        installed = None  # a managed skill is missing on the host: drift
+    current = None
+    for name in names:
+        try:
+            pins = load_pins((releases / name / "skills.lock.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, LockfileError) as exc:
+            raise _Refusal("invalid_pins", EXIT_INVALID_INPUT, error=f"{name}: {exc}") from None
+        if installed is not None and all(pins.get(s) == installed[s] for s in descriptor.skills):
+            current = name
+    later = names[names.index(current) + 1:] if current else []
+    _emit({
+        "ok": True, "status": "ok" if current else "drift", **base, "current": current,
+        "next": later[0] if later else None, "newer": later, "releases": names,
+    })
+    return EXIT_OK
