@@ -18,6 +18,17 @@ RUN uv venv /opt/claw-skills-kit/venv --python 3.14 \
  && uv pip install --python /opt/claw-skills-kit/venv/bin/python /opt/claw-skills-kit/pkg \
  && /opt/claw-skills-kit/venv/bin/python -m claw_skills_kit --help > /dev/null
 
+# Himalaya, the mail CLI behind OpenClaw's bundled `himalaya` skill. Pinned to 1.2.0 because the 2.x series no longer
+# reads the config format that skill documents. The download must match its published sha256 or the build fails.
+ARG HIMALAYA_VERSION=1.2.0
+ARG HIMALAYA_SHA256=e04e6382e3e664ef34b01afa1a2216113194a2975d2859727647b22d9b36d4e4
+RUN /opt/claw-skills-kit/venv/bin/python -c "import hashlib, io, sys, tarfile, urllib.request; \
+url = 'https://github.com/pimalaya/himalaya/releases/download/v${HIMALAYA_VERSION}/himalaya.x86_64-linux.tgz'; \
+data = urllib.request.urlopen(url, timeout=120).read(); \
+sys.exit('himalaya sha256 mismatch') if hashlib.sha256(data).hexdigest() != '${HIMALAYA_SHA256}' else None; \
+open('/usr/local/bin/himalaya', 'wb').write(tarfile.open(fileobj=io.BytesIO(data)).extractfile('himalaya').read())" \
+ && chmod 0755 /usr/local/bin/himalaya && himalaya --version
+
 COPY skills/skill-manager /opt/claw-skills-kit/skill-manager
 # The golden skill library, one folder per release with its pins. Owned by root: the agent can read, not edit.
 COPY library /opt/claw-skills-kit/library
@@ -36,5 +47,6 @@ ENV CSK_PYTHON=/opt/claw-skills-kit/venv/bin/python \
     CSK_RELEASES=/opt/claw-skills-kit/library/releases \
     CSK_HOST=/home/node/.openclaw/csk/host.json \
     CSK_EVIDENCE=/home/node/.openclaw/csk/evidence.jsonl \
-    CSK_BACKUPS=/home/node/.openclaw/csk/backups
+    CSK_BACKUPS=/home/node/.openclaw/csk/backups \
+    HIMALAYA_CONFIG=/home/node/.openclaw/csk/himalaya.toml
 USER node
