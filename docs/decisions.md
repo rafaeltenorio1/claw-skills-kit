@@ -1,6 +1,8 @@
 # Design decisions
 
-The choices I made, why, and what I set aside. Things I had to assume are in `assumptions.md`.
+**English** | [Português](decisions.pt-BR.md)
+
+The choices I made, why, and what I set aside.
 
 ## The toolkit
 
@@ -26,8 +28,8 @@ The choices I made, why, and what I set aside. Things I had to assume are in `as
 
 ## Changes by conversation
 
-7. **A client's request changes only their own gateway.** A operator question can get a new answer on one instance, but
-   changing a golden skill for everyone is a new release on the operator's side.
+7. **A client's request changes only their own gateway.** A library question can get a new answer on one instance, but
+   changing a library skill for everyone is a new release of the library.
 
 8. **Questions that only one client has are extra rows in the same table, marked `Instance`.** The reconciler keeps
    them across updates. I set aside a separate overlay file because it would be one more file to keep in step on every
@@ -53,8 +55,8 @@ The choices I made, why, and what I set aside. Things I had to assume are in `as
 ## Library and updates
 
 14. **A sample library organised in releases.** Each release has the skills, their pins and short notes in plain
-    words, and each skill follows the spec's template. The agent explains an update from those notes, not from file
-    names.
+    words, and each skill has the same files (`SKILL.md`, `client-config.template.md`, `interview.md`, `lineage.md`).
+    The agent explains an update from those notes, not from file names.
 
 15. **Updates go one release at a time.** The toolkit finds the release a host runs by comparing what is installed
     with each release's pins. Jumping straight to the newest would hide the notes in between and make a bad release
@@ -114,6 +116,6 @@ The choices I made, why, and what I set aside. Things I had to assume are in `as
 
 ## Still open
 
-- Whether the accepted `doctor` finding is acceptable to operator, or the network setup should change instead.
+- Whether accepting that one `doctor` finding is right, or the network setup should change instead.
 - Pins by content hash (today) or by git revision as well.
 - Whether the reconciler should run on the host (today) or from an operations agent over the tailnet.
