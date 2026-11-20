@@ -1,7 +1,14 @@
 # claw-skills-kit
 
-My project project for operator: a small Python toolkit for golden skills on OpenClaw gateways, and a Docker host where
-everything the spec asks for can be shown by simply talking to the agent.
+**English** | [Português](README.pt-BR.md)
+
+A small Python toolkit for managing a library of skills on OpenClaw gateways,
+and a Docker host where everything it does can be shown by simply talking to the agent.
+
+The setting I had in mind: an operator runs one OpenClaw gateway per client. Every client gets the same reviewed skills
+(Layer 1: `SKILL.md`, scripts), and each client has their own settings (Layer 2: `client-config.md`, filled from a
+short interview). The operator has to install and update skills on gateways that are already running, without losing
+the client's answers, and the client should be able to ask for changes in plain words.
 
 What I built:
 
@@ -12,27 +19,27 @@ What I built:
 - **Skill manager.** The skill the agent reads. The client asks for something in plain words; the agent proposes it,
   waits for a yes, and only then runs the toolkit's commands.
 
-Every command runs without prompts, prints one JSON object and exits with a documented code, because in the fleet an
+Every command runs without prompts, prints one JSON object and exits with a documented code, because in a fleet an
 agent is the one running them.
 
 ## Running it
 
 You need Docker (I used Docker Desktop on Windows with WSL2) and an env file **outside the repository** with
-`OPENCLAW_GATEWAY_TOKEN` and `ANTHROPIC_API_KEY` (by default `~/.config/csk/openclaw-test.env`). The values never
-go into the repository, the image or the generated config; OpenClaw only gets references to them.
+`OPENCLAW_GATEWAY_TOKEN` and `ANTHROPIC_API_KEY` (by default `~/.config/claw-skills-kit/openclaw-test.env`). The
+values never go into the repository, the image or the generated config; OpenClaw only gets references to them.
 
 ```bash
 docker/up.sh                          # build, configure and start; then open http://127.0.0.1:18790/
-CSK_DEMO_ROLLBACK=1 docker/up.sh   # also add a library release I broke on purpose
-CSK_DEMO_DRIFT=1 docker/up.sh      # also edit an installed skill by hand, like an old host
+CSK_DEMO_ROLLBACK=1 docker/up.sh      # also add a library release I broke on purpose
+CSK_DEMO_DRIFT=1 docker/up.sh         # also edit an installed skill by hand, like an old host
 docker compose -f docker/compose.yml down -v   # throw the instance away
 ```
 
 Without Docker: `uv run pytest -q` runs the tests, and `uv run python -m claw_skills_kit --help` lists the commands.
 
-## What the spec asks, and where it shows
+## What it does, and where it shows
 
-| Spec | What you see in chat | Command behind it |
+| Feature | What you see in chat | Command behind it |
 |---|---|---|
 | Interview runner | the agent asks the skill's blank questions (at most three) | `fill`, `question change` |
 | Install or update, keep the client's answers | "Are there any updates?" -> what changes, in plain words -> yes -> done, answers kept | `host releases`, `reconcile` |
@@ -79,7 +86,7 @@ the agent's transcript and the files on the host, so I am not relying on what th
 
 - **One `doctor` warning is accepted on purpose.** Inside a container the gateway has to listen on all interfaces so
   Docker can publish the port (I publish it on the host's loopback only), and `doctor` warns about that. The host
-  description lists that one finding as accepted; any other finding fails the check. I would like the operator's view.
+  description lists that one finding as accepted; any other finding fails the check.
 - **The "Shall I?" rule is enforced by instructions**, not by OpenClaw. In this setup the agent can run shell commands
   without an approval prompt. What the toolkit enforces is that an apply needs an approval text and records it.
 - **Schedules are OpenClaw automations**: the toolkit cannot dry-run or roll them back.
@@ -91,11 +98,13 @@ the agent's transcript and the files on the host, so I am not relying on what th
 - **Rollback covers the skills folder** (and the one config block an integration touches). It is kept in memory, so
   killing the process in the middle of an apply does not roll back.
 - **One host, Docker Desktop on WSL2 only.** No remote hosts, no tailnet.
-- Formats I had to guess are listed in `docs/assumptions.md`.
+- **The formats of `client-config.md`, `interview.md` and `lineage.md` are this toolkit's conventions**, not an
+  OpenClaw standard.
+- **The skill name rule** (`^[a-z0-9][a-z0-9-]{0,63}$`) is mine; I did not check OpenClaw's own rule.
 
 ## What I would do next
 
-1. A model-free monitor per host with its own alert path (the spec's third problem).
+1. A model-free monitor per host with its own alert path, so a gateway that stops answering is noticed.
 2. CI on the repository: the tests, the library check and a scan for key patterns.
 3. Remote hosts over the tailnet, and a snapshot on disk so an interrupted apply can still roll back.
 4. Pins by git revision as well as content hash.
@@ -103,21 +112,21 @@ the agent's transcript and the files on the host, so I am not relying on what th
 ## Commands
 
 ```bash
-lk fill SKILL_DIR --answers ANSWERS.json --out OUT.md
-lk lock LIBRARY --skills NAME... --out skills.lock.json [--openclaw VERSION] [--node VERSION]
-lk reconcile --host HOST.json --library LIBRARY --target SKILLS_DIR --pins skills.lock.json [--diff] \
+csk fill SKILL_DIR --answers ANSWERS.json --out OUT.md
+csk lock LIBRARY --skills NAME... --out skills.lock.json [--openclaw VERSION] [--node VERSION]
+csk reconcile --host HOST.json --library LIBRARY --target SKILLS_DIR --pins skills.lock.json [--diff] \
     [--apply [--approval TEXT] [--backup-dir DIR]]
-lk question {add|change|remove} SKILL_DIR --key K [--suggested S] [--answer A] [--apply]
-lk skill create SKILLS_DIR --name N --description D [--question KEY SUGGESTED [ANSWER]]... \
+csk question {add|change|remove} SKILL_DIR --key K [--suggested S] [--answer A] [--apply]
+csk skill create SKILLS_DIR --name N --description D [--question KEY SUGGESTED [ANSWER]]... \
     (--instructions T | --instructions-file F|-) [--apply]
-lk skill remove SKILLS_DIR --name N [--discard-answers] [--apply]
-lk integration {status|enable|disable} SKILLS_DIR --name N [--env VAR=VALUE]... [--api-key-env VAR] [--apply]
-lk host {show | check-client --name C | releases --releases DIR | verify-skills | doctor} --host HOST.json
-lk lint [--golden] SKILL_DIR...
-lk history [--limit N]
+csk skill remove SKILLS_DIR --name N [--discard-answers] [--apply]
+csk integration {status|enable|disable} SKILLS_DIR --name N [--env VAR=VALUE]... [--api-key-env VAR] [--apply]
+csk host {show | check-client --name C | releases --releases DIR | verify-skills | doctor} --host HOST.json
+csk lint [--library] SKILL_DIR...
+csk history [--limit N]
 ```
 
-`lk` is `uv run python -m claw_skills_kit` (or `skills/skill-manager/scripts/lk`). Anything that writes is a dry run
+`csk` is `uv run python -m claw_skills_kit` (or `skills/skill-manager/scripts/csk`). Anything that writes is a dry run
 unless `--apply` is given. Where approvals are recorded, `--apply` also needs `--approval`. Reports carry paths,
 hashes, keys and variable names, never answer values or secrets.
 
@@ -144,12 +153,12 @@ hashes, keys and variable names, never answer values or secrets.
 ## Layout
 
 ```
-src/claw_skills_kit/        the toolkit (cli.py has the commands and exit codes)
-skills/skill-manager/  the skill the agent reads, and its lk wrapper
+src/claw_skills_kit/   the toolkit (cli.py has the commands and exit codes)
+skills/skill-manager/  the skill the agent reads, and its csk wrapper
 library/releases/      my sample skill library, one folder per release
 library/demo-releases/ a release broken on purpose, only added on request
-host/AGENTS.csk.md  the rules placed at the top of the workspace AGENTS.md
+host/AGENTS.csk.md     the rules placed at the top of the workspace AGENTS.md
 docker/                image, compose file, up.sh, bootstrap
-docs/                  decisions.md, assumptions.md, spec-answers.md
+docs/                  decisions.md (design decisions, English and Portuguese)
 tests/
 ```
