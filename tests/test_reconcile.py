@@ -286,7 +286,7 @@ def test_report_is_json_serialisable(library, target):
     assert json.loads(json.dumps(r.to_dict()))["status"] == "applied"
 
 
-# --- instance-only questions (Phase 2) ---------------------------------------------
+# --- instance-only questions -------------------------------------------------------
 
 def add_instance_row(target, row):
     """Add a row the way `append_fields` does: keep the file's final newline (or its absence)."""
@@ -298,7 +298,7 @@ def add_instance_row(target, row):
 def test_an_instance_question_survives_a_reconcile_with_its_answer(library_dir, library, target):
     reconcile(desc(), library, target, pins(library), apply=True)
     add_instance_row(target, "| interval_days | Instance | Every 7 days | 7 |")
-    (library_dir / "alpha/SKILL.md").write_text("# skill v2\n")  # golden skill changes
+    (library_dir / "alpha/SKILL.md").write_text("# skill v2\n")  # library skill changes
 
     r = reconcile(desc(), library, target, pins(library), apply=True)
 
@@ -317,14 +317,14 @@ def test_a_blank_instance_question_is_kept_and_reported_as_pending(library, targ
     assert "interval_days" in r.pending_answers["alpha"]
 
 
-def test_instance_questions_do_not_change_the_golden_revision(library, target):
+def test_instance_questions_do_not_change_the_library_revision(library, target):
     p = pins(library)
     reconcile(desc(), library, target, p, apply=True)
     add_instance_row(target, "| interval_days | Instance | Every 7 days | 7 |")
     assert compute_revisions(library, ["alpha"]) == {"alpha": p["alpha"]}
 
 
-def test_when_the_golden_template_adopts_an_instance_key_the_answer_moves_to_its_row(library_dir, library, target):
+def test_when_the_library_template_adopts_an_instance_key_the_answer_moves_to_its_row(library_dir, library, target):
     reconcile(desc(), library, target, pins(library), apply=True)
     add_instance_row(target, "| interval_days | Instance | Every 7 days | 7 |")
     tpl = library_dir / "alpha/client-config.template.md"

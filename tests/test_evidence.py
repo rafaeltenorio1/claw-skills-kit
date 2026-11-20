@@ -80,7 +80,7 @@ def test_a_refused_apply_is_recorded_with_its_status(capsys, tmp_path, log):
                     "--approval", "Remove the meeting notes skill?")
     assert code == 11
     (entry,) = history(log)
-    assert (entry["status"], entry["exit_code"], entry["command"]) == ("golden_skill", 11, "skill")
+    assert (entry["status"], entry["exit_code"], entry["command"]) == ("library_skill", 11, "skill")
 
 
 def test_history_is_newest_first_and_tolerates_a_torn_line(capsys, skill, log):

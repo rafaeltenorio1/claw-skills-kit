@@ -54,12 +54,12 @@ def test_findings_carry_kind_and_line_never_the_text():
 
 @pytest.mark.parametrize("folder", GOOD, ids=lambda p: f"{p.parents[1].name}/{p.name}")
 def test_the_library_passes_the_lint(folder):
-    assert lint_skill(folder, golden=True) == []
+    assert lint_skill(folder, library=True) == []
 
 
 def test_lint_catches_the_rollback_demo_release():
     folder = ROOT / "library/demo-releases/2026.11.25/skills/meeting-notes"
-    assert [f.kind for f in lint_skill(folder, golden=True)] == ["no_description"]
+    assert [f.kind for f in lint_skill(folder, library=True)] == ["no_description"]
 
 
 def test_lint_reports_missing_files_and_leaks(tmp_path):
@@ -67,7 +67,7 @@ def test_lint_reports_missing_files_and_leaks(tmp_path):
     (folder / "scripts").mkdir(parents=True)
     (folder / "SKILL.md").write_text("---\nname: leaky\ndescription: d\n---\nPost to #team-acme\n")
     (folder / "scripts/send.py").write_text("TO = 'joao@acme.com'\n")
-    kinds = {(f.file, f.kind) for f in lint_skill(folder, golden=True)}
+    kinds = {(f.file, f.kind) for f in lint_skill(folder, library=True)}
     assert {("interview.md", "missing_file"), ("SKILL.md", "chat_channel"), ("scripts/send.py", "email")} <= kinds
 
 
@@ -77,7 +77,7 @@ def run(capsys, *argv):
 
 
 def test_cli_lint(capsys, tmp_path):
-    code, out = run(capsys, "lint", "--golden", *map(str, GOOD[:3]))
+    code, out = run(capsys, "lint", "--library", *map(str, GOOD[:3]))
     assert (code, out["status"]) == (0, "ok")
     bad = tmp_path / "bad"
     bad.mkdir()

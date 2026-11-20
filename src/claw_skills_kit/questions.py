@@ -1,8 +1,8 @@
-"""Per-instance question edits on a host's client-config.md (Phase 2).
+"""Per-instance question edits on a host's client-config.md.
 
 Rules (decided by Rafael):
-- New questions are instance-only rows (`Comes from` = Instance); the golden template never changes here.
-- A golden question can only get a new answer here. Changing or removing it per instance would be undone by the
+- New questions are instance-only rows (`Comes from` = Instance); the library template never changes here.
+- A library question can only get a new answer here. Changing or removing it per instance would be undone by the
   next reconcile, so it is refused.
 - Removing a question that holds an answer is refused unless the caller says the answer may be discarded.
 """
@@ -76,8 +76,8 @@ def change_question(text: str, key: str, *, suggested: str | None = None, answer
     field = _field(text, key)
     if suggested is not None and not is_instance_field(field):
         raise QuestionError(
-            "golden_question",
-            f"{key!r} comes from the golden skill; only its answer can change for one client.",
+            "library_question",
+            f"{key!r} comes from the library skill; only its answer can change for one client.",
         )
     try:
         new = update_field(text, key, suggested=suggested, answer=answer)
@@ -90,8 +90,8 @@ def remove_question(text: str, key: str, *, discard_answer: bool = False) -> Edi
     field = _field(text, key)
     if not is_instance_field(field):
         raise QuestionError(
-            "golden_question",
-            f"{key!r} comes from the golden skill; it cannot be removed for one client.",
+            "library_question",
+            f"{key!r} comes from the library skill; it cannot be removed for one client.",
         )
     had_answer = bool(field.answer.strip())
     if had_answer and not discard_answer:

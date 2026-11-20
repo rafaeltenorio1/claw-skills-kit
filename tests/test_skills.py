@@ -17,14 +17,14 @@ from claw_skills_kit.skills import (
 )
 from claw_skills_kit.template_format import new_client_config, parse_template
 
-GOLDEN_SKILL_MD = "---\nname: demo-skill\ndescription: Demo.\nmetadata:\n  layer: 1\n---\n\n# Demo\n"
+LIBRARY_SKILL_MD = "---\nname: demo-skill\ndescription: Demo.\nmetadata:\n  layer: 1\n---\n\n# Demo\n"
 
 
 @pytest.fixture
 def skills_dir(tmp_path):
     d = tmp_path / "skills"
     (d / "demo-skill").mkdir(parents=True)
-    (d / "demo-skill/SKILL.md").write_text(GOLDEN_SKILL_MD)
+    (d / "demo-skill/SKILL.md").write_text(LIBRARY_SKILL_MD)
     return d
 
 
@@ -53,8 +53,8 @@ def test_skill_md_has_frontmatter_with_the_instance_mark():
     assert is_instance_skill(md)
 
 
-def test_a_golden_skill_md_is_not_an_instance_skill():
-    assert not is_instance_skill(GOLDEN_SKILL_MD)
+def test_a_library_skill_md_is_not_an_instance_skill():
+    assert not is_instance_skill(LIBRARY_SKILL_MD)
     assert not is_instance_skill("# no frontmatter\n  csk_origin: instance\n")
     # the mark only counts inside the frontmatter
     assert not is_instance_skill("---\nname: x\n---\n  csk_origin: instance\n")
@@ -107,10 +107,10 @@ def test_remove_an_instance_skill_without_answers(skills, skills_dir):
     assert not (skills_dir / "weekly-report").exists()
 
 
-def test_remove_refuses_a_golden_skill(skills):
+def test_remove_refuses_a_library_skill(skills):
     with pytest.raises(SkillError) as exc:
         plan_remove(skills, "demo-skill", discard_answers=True)
-    assert exc.value.status == "golden_skill"
+    assert exc.value.status == "library_skill"
 
 
 def test_remove_refuses_a_missing_skill(skills):
@@ -240,7 +240,7 @@ def test_cli_create_refuses_stdin_that_is_not_utf8(capsys, monkeypatch, skills_d
     [
         (["create", "{d}", "--name", "demo-skill", "--description", "d", "--instructions", "b"], 11, "skill_exists"),
         (["create", "{d}", "--name", "Bad", "--description", "d", "--instructions", "b"], 11, "invalid_skill"),
-        (["remove", "{d}", "--name", "demo-skill", "--apply"], 11, "golden_skill"),
+        (["remove", "{d}", "--name", "demo-skill", "--apply"], 11, "library_skill"),
         (["remove", "{d}", "--name", "nope"], 11, "skill_not_found"),
     ],
 )

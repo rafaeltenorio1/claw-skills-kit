@@ -51,7 +51,7 @@ def test_bad_input(capsys, tmp_path, host, argv, code):
     assert (got, out["ok"]) == (code, False)
 
 
-# --- verify-skills: the smoke check that OpenClaw finds every operator skill ----------------------------
+# --- verify-skills: the smoke check that OpenClaw finds every library skill ----------------------------
 
 import shlex  # noqa: E402
 import shutil  # noqa: E402

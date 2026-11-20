@@ -13,7 +13,7 @@ _VALUE_COLUMN = 3
 
 _ANSWER_IS_REQUIRED = True
 
-# 'Comes from' value of a question that exists only on one client's instance (not in the golden template).
+# 'Comes from' value of a question that exists only on one client's instance (not in the library template).
 INSTANCE_SOURCE = "Instance"
  
  

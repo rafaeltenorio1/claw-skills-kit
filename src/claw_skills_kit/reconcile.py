@@ -129,7 +129,7 @@ def _merge_answers(skill: str, template_text: str, existing: bytes | None) -> tu
             ) from exc
         known = {f.key for f in new.fields}
         for f in old.fields:
-            if f.key in known:  # the golden template has this question: carry the answer
+            if f.key in known:  # the library template has this question: carry the answer
                 if f.answer.strip():
                     carried[f.key] = f.answer
             elif is_instance_field(f) and f.key not in new.standards:

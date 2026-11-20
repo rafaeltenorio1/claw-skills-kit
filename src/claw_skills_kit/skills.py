@@ -1,8 +1,8 @@
-"""Create or remove a skill on one client's instance (Phase 2).
+"""Create or remove a skill on one client's instance.
 
 A skill created here is marked in its SKILL.md frontmatter with `metadata.csk_origin: instance`. OpenClaw ignores
-unknown metadata keys (verified for `layer` and `version`, see docs/estudo.md), so the mark does not change how the
-skill loads. Only marked skills can be removed here: golden skills belong to the reconciler.
+unknown metadata keys (verified on OpenClaw 2026.11.3 for `layer` and `version`), so the mark does not change how the
+skill loads. Only marked skills can be removed here: library skills belong to the reconciler.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from claw_skills_kit.template_format import TemplateFormatError, new_client_conf
 ORIGIN_KEY = "csk_origin"
 INSTANCE_ORIGIN = "instance"
 
-# Assumption: lowercase letters, digits and hyphens, like the golden skills. OpenClaw's own rule is not verified.
+# Assumption: lowercase letters, digits and hyphens, like the library skills. OpenClaw's own rule is not verified.
 _NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _ORIGIN_LINE = re.compile(rf"^\s+{ORIGIN_KEY}:\s*{INSTANCE_ORIGIN}\s*$")
 
@@ -134,7 +134,7 @@ def plan_remove(skills: Host, name: str, *, discard_answers: bool = False) -> Sk
     skill_md = skills.read(f"{name}/{SKILL_FILE}")
     if skill_md is None or not is_instance_skill(skill_md.decode("utf-8", errors="replace")):
         raise SkillError(
-            "golden_skill", f"{name!r} was not created on this instance; it cannot be removed from here."
+            "library_skill", f"{name!r} was not created on this instance; it cannot be removed from here."
         )
     had_answers = False
     config = skills.read(f"{name}/{ANSWERS_FILE}")

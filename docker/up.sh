@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, configure and start the operator OpenClaw gateway in Docker. Safe to run again.
+# Build, configure and start the OpenClaw gateway in Docker. Safe to run again.
 #   docker/up.sh                          build + bootstrap + start + checks
 #   CSK_DEMO_ROLLBACK=1 docker/up.sh   same, with the release that is broken on purpose (rollback demo)
 #   CSK_DEMO_DRIFT=1 docker/up.sh      same, and an installed skill is edited by hand (drift demo)
@@ -15,7 +15,7 @@ else
     say "rollback demo: off (set CSK_DEMO_ROLLBACK=1 to turn it on)"
 fi
 if [ "${CSK_DEMO_DRIFT:-0}" = "1" ]; then
-    say "drift demo: ON (bootstrap edits an installed operator skill by hand)"
+    say "drift demo: ON (bootstrap edits an installed library skill by hand)"
 fi
 say "building image"
 docker compose build --quiet gateway

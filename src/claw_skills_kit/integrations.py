@@ -82,7 +82,7 @@ def _indent(line: str) -> int:
 def read_requirements(skill_md: str) -> Requirements:
     """requires.env and primaryEnv from `metadata.openclaw` (block YAML, inline or dash lists).
 
-    Only the YAML subset of the operator template is understood; an `openclaw` block written as a JSON5 object on
+    Only the YAML subset of the skill template is understood; an `openclaw` block written as a JSON5 object on
     one line is refused rather than misread.
     """
     lines = _frontmatter(skill_md)

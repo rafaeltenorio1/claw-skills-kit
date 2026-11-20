@@ -32,7 +32,7 @@ else
     step "existing config found, onboarding skipped"
 fi
 
-# 2. The settings chosen during the project (see CLAUDE.md / docs/decisions.md).
+# 2. Settings (see docs/decisions.md).
 step "applying settings"
 openclaw config set --batch-json "[
   {\"path\": \"agents.defaults.model.primary\", \"value\": \"anthropic/claude-opus-5-5\"},
@@ -107,7 +107,7 @@ if [ ! -f "$CSK_HOST" ]; then
     first="${CSK_INITIAL_RELEASE:-$(ls "$CSK_RELEASES" | sort | head -n 1)}"
     step "first run: writing the host descriptor and installing release $first"
 else
-    step "host descriptor found: refreshing its smoke checks, golden skills left as they are"
+    step "host descriptor found: refreshing its smoke checks, library skills left as they are"
 fi
 mkdir -p "$(dirname "$CSK_HOST")"
 "$CSK_PYTHON" - "$CSK_HOST" "$WORKSPACE/skills" "$CSK_RELEASES" "$first" <<'EOF2'
@@ -146,7 +146,7 @@ if [ -n "$first" ]; then
         --approval "First install of release $first by the operator (bootstrap)"
 fi
 
-# 3c. Drift demo, off by default (CSK_DEMO_DRIFT=1): edit an installed operator skill by hand, the way hosts were
+# 3c. Drift demo, off by default (CSK_DEMO_DRIFT=1): edit an installed library skill by hand, the way hosts were
 #     patched before the pipeline, with a client rule (and a contact) where it does not belong. Applied once.
 if [ "${CSK_DEMO_DRIFT:-0}" = "1" ] && [ -f "$WORKSPACE/skills/inbox-triage/SKILL.md" ] \
         && ! grep -q "Local change (made by hand" "$WORKSPACE/skills/inbox-triage/SKILL.md"; then

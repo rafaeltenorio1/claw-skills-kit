@@ -1,7 +1,7 @@
 """Evidence of every change made to a host: the approval before it, the outcome after it.
 
-The spec: "approvals come from a human in chat, recorded, before any mutating step" and "every phase leaves its
-evidence on disk". When CSK_EVIDENCE names a file, each applying command appends two JSON lines with one id:
+Two rules: approvals come from a human in chat and are recorded before any mutating step, and every phase leaves
+its evidence on disk. When CSK_EVIDENCE names a file, each applying command appends two JSON lines with one id:
 
   {"id", "phase": "approved", "ts", "command", "action", "target", "approval"}   before anything is written
   {"id", "phase": "result",   "ts", "status", ...what changed}                   after it

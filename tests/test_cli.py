@@ -30,7 +30,7 @@ KEY = "extra urgent_rules"
 
 @pytest.fixture
 def skill_dir(tmp_path: Path) -> Path:
-    folder = tmp_path / "golden-skills" / "demo-skill"
+    folder = tmp_path / "library-skills" / "demo-skill"
     folder.mkdir(parents=True)
     (folder / TEMPLATE_NAME).write_bytes(TEMPLATE.encode("utf-8"))
     return folder

@@ -1,7 +1,7 @@
 """Find client specifics in Layer 1 text (SKILL.md, scripts, references).
 
-The spec's library validator fails the build on "any secret, email address, chat or drive identifier, phone number,
-or missing required file in Layer 1". This module finds the first five; `lint_skill` adds the file checks.
+The library validator fails the build on any secret, email address, chat or drive identifier, phone number, or
+missing required file in Layer 1. This module finds the first five; `lint_skill` adds the file checks.
 
 Findings carry a kind and a line number only, never the matched text: the point is to keep client data out of
 shared files, so the report must not copy it either. The patterns are heuristics and can miss or over-match; they
@@ -26,7 +26,7 @@ _PHONE = re.compile(r"(?<![\w.])\+?\(?\d[\d\s().-]{7,}\d(?![\w.])")
 
 LAYER1_FILES = ("SKILL.md",)
 LAYER1_DIRS = ("scripts", "references", "assets")
-GOLDEN_FILES = ("SKILL.md", "client-config.template.md", "interview.md", "lineage.md")
+LIBRARY_FILES = ("SKILL.md", "client-config.template.md", "interview.md", "lineage.md")
 _TEXT_SUFFIXES = {".md", ".txt", ".py", ".sh", ".js", ".ts", ".json", ".yaml", ".yml", ".toml", ".csv", ""}
 
 
@@ -80,10 +80,10 @@ def _frontmatter_fields(text: str) -> dict[str, str] | None:
     return fields
 
 
-def lint_skill(folder: Path, *, golden: bool) -> list[Finding]:
-    """Layer 1 must hold no client specifics; a golden skill also needs its Layer 2 files."""
+def lint_skill(folder: Path, *, library: bool) -> list[Finding]:
+    """Layer 1 must hold no client specifics; a library skill also needs its Layer 2 files."""
     findings: list[Finding] = []
-    required = GOLDEN_FILES if golden else LAYER1_FILES
+    required = LIBRARY_FILES if library else LAYER1_FILES
     for name in required:
         if not (folder / name).is_file():
             findings.append(Finding("missing_file", 0, name))
@@ -109,7 +109,7 @@ def lint_skill(folder: Path, *, golden: bool) -> list[Finding]:
         rel = str(path.relative_to(folder))
         findings += find_client_specifics(path.read_text(encoding="utf-8", errors="replace"), rel)
     interview = folder / "interview.md"
-    if golden and interview.is_file():
+    if library and interview.is_file():
         questions = [ln for ln in interview.read_text(encoding="utf-8").splitlines() if re.match(r"\| Q\d+ \|", ln)]
         if not 1 <= len(questions) <= 3:
             findings.append(Finding("interview_size", 0, "interview.md"))

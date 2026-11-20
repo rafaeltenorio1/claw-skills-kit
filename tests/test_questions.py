@@ -80,21 +80,21 @@ def test_change_an_instance_question():
     assert "| interval_days | Instance | Every 14 days | 7 |" in edit.text
 
 
-def test_a_golden_question_can_get_a_new_answer():
+def test_a_library_question_can_get_a_new_answer():
     edit = change_question(CONFIG, "run_time", answer="09:00")
     assert "| run_time | Q1 | 08:00 | 09:00 |" in edit.text
 
 
-def test_a_golden_question_text_cannot_change_per_instance():
+def test_a_library_question_text_cannot_change_per_instance():
     with pytest.raises(QuestionError) as exc:
         change_question(CONFIG, "run_time", suggested="10:00")
-    assert exc.value.status == "golden_question"
+    assert exc.value.status == "library_question"
 
 
-def test_a_golden_question_cannot_be_removed_per_instance():
+def test_a_library_question_cannot_be_removed_per_instance():
     with pytest.raises(QuestionError) as exc:
         remove_question(CONFIG, "run_time", discard_answer=True)
-    assert exc.value.status == "golden_question"
+    assert exc.value.status == "library_question"
 
 
 def test_removing_an_answered_question_needs_explicit_consent():
@@ -152,7 +152,7 @@ def test_cli_report_never_contains_answer_values(capsys, host_skill):
     "argv, code, status",
     [
         (["remove", "{d}", "--key", "interval_days", "--apply"], 14, "answer_would_be_lost"),
-        (["remove", "{d}", "--key", "run_time", "--apply"], 13, "golden_question"),
+        (["remove", "{d}", "--key", "run_time", "--apply"], 13, "library_question"),
         (["add", "{d}", "--key", "run_time", "--suggested", "x"], 13, "question_exists"),
         (["change", "{d}", "--key", "nope", "--answer", "x"], 13, "question_not_found"),
     ],

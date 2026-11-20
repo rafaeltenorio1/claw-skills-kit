@@ -1,6 +1,6 @@
 """The sample skill library shipped in the Docker image (library/releases/<release>/).
 
-Checks that each release follows the spec's template and that the update from the first release to the second
+Checks that each release follows the skill template and that the update from the first release to the second
 tells the story the agent explains in chat: answers kept, one new question, nothing discarded.
 """
 import re
@@ -72,7 +72,7 @@ def test_each_skill_follows_the_template(release):
 
         template = parse_template((folder / "client-config.template.md").read_text(encoding="utf-8"))
         questions = interview_rows((folder / "interview.md").read_text(encoding="utf-8"))
-        assert 1 <= len(questions) <= 3, "the spec allows at most three interview questions"
+        assert 1 <= len(questions) <= 3, "at most three interview questions"
         assert {(q[0], q[3]) for q in questions} == {(f.comes_from, f.key) for f in template.fields}
 
 

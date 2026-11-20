@@ -53,7 +53,7 @@ _INTEGRATION_CODES = {
 _QUESTION_CODES = {
     "question_exists": EXIT_QUESTION,
     "question_not_found": EXIT_QUESTION,
-    "golden_question": EXIT_QUESTION,
+    "library_question": EXIT_QUESTION,
     "invalid_question": EXIT_QUESTION,
     "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
     "invalid_existing_config": EXIT_EXISTING_CONFIG,
@@ -64,7 +64,7 @@ _SKILL_CODES = {
     "invalid_skill": EXIT_SKILL,
     "skill_exists": EXIT_SKILL,
     "skill_not_found": EXIT_SKILL,
-    "golden_skill": EXIT_SKILL,
+    "library_skill": EXIT_SKILL,
     "client_data_in_skill": EXIT_SKILL,
     "answer_would_be_lost": EXIT_ANSWER_WOULD_BE_LOST,
     "rolled_back": EXIT_ROLLED_BACK,
@@ -160,7 +160,7 @@ def _build_parser() -> argparse.ArgumentParser:
     q_sub = q_parser.add_subparsers(dest="action", required=True)
     for action, help_text in (
         ("add", "Add an instance-only question."),
-        ("change", "Change an instance question, or only the answer of a golden one."),
+        ("change", "Change an instance question, or only the answer of a library one."),
         ("remove", "Remove an instance-only question."),
     ):
         a = q_sub.add_parser(action, help=help_text)
@@ -214,13 +214,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     lint_parser.add_argument("skill_dirs", nargs="+", type=Path, help="Skill folders to check.")
     lint_parser.add_argument(
-        "--golden", action="store_true",
-        help="Golden skills: also require client-config.template.md, interview.md (1-3 questions), lineage.md.",
+        "--library", action="store_true",
+        help="Library skills: also require client-config.template.md, interview.md (1-3 questions), lineage.md.",
     )
 
     h_parser = subparsers.add_parser("host", help="Read this host's descriptor (read-only).")
     h_sub = h_parser.add_subparsers(dest="action", required=True)
-    show = h_sub.add_parser("show", help="The host, its one client and its operator skills.")
+    show = h_sub.add_parser("show", help="The host, its one client and its library skills.")
     show.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
     check = h_sub.add_parser(
         "check-client",
@@ -242,7 +242,7 @@ def _build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
     verify = h_sub.add_parser(
         "verify-skills",
-        help="Smoke check: OpenClaw finds every operator skill of this host (exit 11 lists the missing ones).",
+        help="Smoke check: OpenClaw finds every library skill of this host (exit 11 lists the missing ones).",
     )
     verify.add_argument("--host", required=True, type=Path, help="Host descriptor (JSON).")
 
@@ -371,7 +371,7 @@ def _dispatch(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
         if args.command == "host":
             return _run_host(args)
         if args.command == "lint":
-            return _run_lint(args.skill_dirs, args.golden)
+            return _run_lint(args.skill_dirs, args.library)
         parser.error(f"Unknown command: {args.command}")
     except _Refusal as refusal:
         _emit({"ok": False, "status": refusal.status, **refusal.details})
@@ -780,13 +780,13 @@ def _releases(descriptor, base: dict[str, object], releases: Path) -> int:
     return EXIT_OK
 
 
-def _run_lint(folders: list[Path], golden: bool) -> int:
+def _run_lint(folders: list[Path], library: bool) -> int:
     from claw_skills_kit.layer1 import lint_skill
 
     results: dict[str, list[dict[str, object]]] = {}
     for folder in folders:
         _require_dir(folder, "skill folder")
-        results[folder.name] = [f.to_dict() for f in lint_skill(folder, golden=golden)]
+        results[folder.name] = [f.to_dict() for f in lint_skill(folder, library=library)]
     failed = {name: found for name, found in results.items() if found}
     # kinds and lines only, never the text found
     _emit({"ok": not failed, "status": "lint_failed" if failed else "ok", "skills": results})

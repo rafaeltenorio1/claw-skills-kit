@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _VERSION = re.compile(r"[0-9][0-9A-Za-z.+-]{0,63}")
-RUNTIME_KEYS = ("openclaw", "node")  # what the spec asks to pin besides skill revisions
+RUNTIME_KEYS = ("openclaw", "node")  # runtime pinned besides skill revisions
 
 
 class LockfileError(ValueError):
