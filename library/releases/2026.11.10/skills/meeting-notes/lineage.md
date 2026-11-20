@@ -1,5 +1,5 @@
 # meeting-notes: lineage
 
-- Origin: operator skill library (synthetic sample for the project).
+- Origin: skill library (synthetic sample).
 - Version history:
   - 0.1.0: first version.

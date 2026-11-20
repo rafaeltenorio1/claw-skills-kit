@@ -4,7 +4,7 @@ It exists to demonstrate the reconciler's rollback on a real gateway. `meeting-n
 frontmatter (`desciption:` instead of `description:`), so OpenClaw cannot load the skill. Its pins match its files,
 as they would for a release that passed review but breaks on a host.
 
-What should happen when it is applied: the smoke check `lk host verify-skills` finds `meeting-notes` missing, the
+What should happen when it is applied: the smoke check `csk host verify-skills` finds `meeting-notes` missing, the
 reconciler restores every file it touched and verifies them by reading them back, and reports `rolled_back`
 (exit 6). The host keeps the previous release.
 

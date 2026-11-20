@@ -57,7 +57,7 @@ def test_rejects_a_text_without_the_client_answers_section():
 
 def test_rejects_a_text_without_the_standards_section():
     text = "## Client answers\n" + HEADER + "\n|---|---|---|---|\n| k | Q1 | s | |\n"
-    with pytest.raises(TemplateFormatError, match="standards"):
+    with pytest.raises(TemplateFormatError, match="## Standards"):
         parse_template(text)
 
 

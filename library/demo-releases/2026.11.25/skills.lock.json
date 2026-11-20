@@ -1,8 +1,8 @@
 {
   "skills": {
-    "inbox-triage": "86595c29c61752e42d70e74f1c7668d6871bdfd6ea2dfadd2845152ace11006b",
-    "meeting-notes": "4a66fd6543319559105df7e81de44b5eb25ccdde589970de0a6d39393c24ed3d",
-    "team-digest": "d1d598e3a4d17528a70a24109a5ca5d13b0af0cee8355d539690169e3b9421b0"
+    "inbox-triage": "a231ac0e197bdb6cb7a882ba43c995dd49318214961393a5795c2e1e3618cb49",
+    "meeting-notes": "3682de7ed5ea65815e6fd253a79edf1a6a0e3c47d345bb3b2cf42d16f926207a",
+    "team-digest": "ae4b43c127da973864f8052c33062f085a4d7a185b9b6952068a8c171a4e0613"
   },
   "runtime": {
     "openclaw": "2026.11.3",
